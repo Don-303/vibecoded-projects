@@ -1,7 +1,7 @@
 """Loads the syllabus and exposes lesson lookups."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -10,11 +10,18 @@ SYLLABUS_PATH = Path(__file__).resolve().parent.parent / "curriculum" / "syllabu
 
 
 @dataclass
+class SourceRef:
+    repo: str
+    file: str
+
+
+@dataclass
 class Lesson:
     id: str
     title: str
     module_id: str
     module_title: str
+    sources: list[SourceRef] = field(default_factory=list)
 
 
 @dataclass
@@ -29,7 +36,13 @@ def load_modules() -> list[Module]:
     modules = []
     for m in raw["modules"]:
         lessons = [
-            Lesson(id=l["id"], title=l["title"], module_id=m["id"], module_title=m["title"])
+            Lesson(
+                id=l["id"],
+                title=l["title"],
+                module_id=m["id"],
+                module_title=m["title"],
+                sources=[SourceRef(repo=s["repo"], file=s["file"]) for s in l.get("sources", [])],
+            )
             for l in m["lessons"]
         ]
         modules.append(Module(id=m["id"], title=m["title"], lessons=lessons))

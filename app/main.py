@@ -213,9 +213,7 @@ class TutorApp(App):
         reply_so_far = ""
         chat_log = self.query_one("#chat-log", Markdown)
         try:
-            async for token in agent.stream_reply(
-                lesson.module_title, lesson.title, history, user_message
-            ):
+            async for token in agent.stream_reply(lesson, history, user_message):
                 reply_so_far += token
                 await chat_log.update(self.chat_buffer + reply_so_far)
                 self._scroll_chat_to_end()

@@ -4,20 +4,35 @@ modules:
     lessons:
       - id: py-core
         title: "Python core: types, control flow, functions, comprehensions"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture02-Introduction-to-Python.ipynb}
       - id: py-numpy
         title: "NumPy: arrays, vectorization, broadcasting"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture03-Introduction-to-NumPy.ipynb}
       - id: py-pandas
         title: "Pandas: Series/DataFrame, indexing, time series"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture04-Introduction-to-Pandas.ipynb}
       - id: py-viz
         title: "Visualization: matplotlib basics for price/return series"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture05-Plotting-Data.ipynb}
 
   - id: math-foundations
     title: "Math Foundations for Quant Finance"
     lessons:
       - id: mth-linalg
         title: "Linear algebra: matrix ops, eigenvalues/eigenvectors, PCA"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture36-PCA.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture26-Estimating-Covariance-Matrices.ipynb}
+          - {repo: quantecon-lecture-python-intro, file: eigen_I.md}
       - id: mth-prob
         title: "Probability & stochastic processes: Brownian motion, Markov chains"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture11-Random-Variables.ipynb}
+          - {repo: quantecon-lecture-python-intro, file: markov_chains_I.md}
       - id: mth-calc
         title: "Stochastic calculus intuition: Ito's lemma (conceptual)"
       - id: mth-optim
@@ -28,18 +43,35 @@ modules:
     lessons:
       - id: st-descriptive
         title: "Descriptive statistics and probability distributions"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture06-Means.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture07-Variance.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture08-Statistical-Moments.ipynb}
       - id: st-hypothesis
         title: "Hypothesis testing and confidence intervals"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture20-Hypothesis-Testing.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture21-Confidence-Intervals.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture23-p-Hacking-and-Multiple-Comparisons-Bias.ipynb}
       - id: st-ols
         title: "Linear regression (OLS) from scratch and with statsmodels"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture12-Linear-Regression.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture13-Maximum-Likelihood-Estimation.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture15-Multiple-Linear-Regression.ipynb}
       - id: st-stationarity
         title: "Correlation vs causation; intro to stationarity"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture09-Linear-Correlation-Analysis.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture10-Instability-of-Estimates.ipynb}
 
   - id: ml-foundations
     title: "Machine Learning Foundations"
     lessons:
       - id: ml-traintest
         title: "Train/test split, cross-validation, overfitting"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture19-Dangers-of-Overfitting.ipynb}
       - id: ml-bias-variance
         title: "Bias-variance tradeoff and model complexity"
       - id: ml-regression
@@ -86,14 +118,31 @@ modules:
     lessons:
       - id: ec-stationarity
         title: "Stationarity and the ADF test"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture41-Integration-Cointegration-and-Stationarity.ipynb}
       - id: ec-arima
         title: "ARIMA / SARIMA modeling"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture43-Autocorrelation-and-AR-Models.ipynb}
       - id: ec-cointegration
         title: "Cointegration and pairs trading"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture41-Integration-Cointegration-and-Stationarity.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture42-Introduction-to-Pairs-Trading.ipynb}
       - id: ec-garch
         title: "Volatility modeling with GARCH"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture44-ARCH-GARCH-and-GMM.ipynb}
       - id: ec-factor
         title: "Factor models (Fama-French style)"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture32-Fundamental-Factor-Models.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture34-Factor-Risk-Exposure.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture38-Factor-Analysis-with-Alphalens.ipynb}
+      - id: ec-kalman
+        title: "Kalman filters for dynamic/time-varying regressions"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture45-Kalman-Filters.ipynb}
 
   - id: financial-theory
     title: "Financial Theory"
@@ -102,16 +151,31 @@ modules:
         title: "Modern Portfolio Theory and the efficient frontier"
       - id: fin-capm
         title: "CAPM and Arbitrage Pricing Theory"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture30-CAPM-and-Arbitrage-Pricing-Theory.ipynb}
       - id: fin-portfolio-construction
         title: "Portfolio construction models: equal-weight, mean-variance, risk parity, Black-Litterman"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture35-Risk-Constrained-Portfolio-Optimization.ipynb}
+      - id: fin-hedging
+        title: "Hedging strategies: why and how to hedge, beta hedging"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture39-Why-Hedge.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture31-Beta-Hedging.ipynb}
       - id: fin-derivatives
         title: "Derivatives pricing: Black-Scholes, binomial trees, the Greeks"
       - id: fin-fixedincome
         title: "Fixed income: yield curves, duration and convexity"
       - id: fin-microstructure
         title: "Market microstructure: order books, liquidity, transaction costs"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture27-Introduction-to-Volume-Slippage-and-Liquidity.ipynb}
       - id: fin-risk
         title: "Risk management: VaR, CVaR, stress testing, drawdown analysis"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture24-Leverage.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture25-Position-Concentration-Risk.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture40-VaR-and-CVaR.ipynb}
 
   - id: ml-finance
     title: "ML Applied to Finance"
@@ -130,6 +194,8 @@ modules:
         title: "Walk-forward validation for time series"
       - id: mf-backtest
         title: "Backtesting fundamentals and pitfalls"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture33-Portfolio-Analysis-with-pyfolio.ipynb}
 
   - id: engineering-practices
     title: "Engineering Practices for Quant Work"
@@ -138,8 +204,13 @@ modules:
         title: "SQL and handling large panel/tick datasets efficiently"
       - id: eng-algo-framework
         title: "Algorithm framework design: universe selection, alpha, portfolio construction, risk, execution"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture29-Universe-Selection.ipynb}
       - id: eng-fill-models
         title: "Realistic backtesting mechanics: fill models, slippage, and fee models"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture27-Introduction-to-Volume-Slippage-and-Liquidity.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture28-Market-Impact-Models.ipynb}
       - id: eng-backtest-discipline
         title: "Backtesting discipline: survivorship bias, overfitting, realistic costs"
       - id: eng-reproducibility
@@ -162,3 +233,7 @@ modules:
         title: "Build an LSTM model fusing technical and fundamental signals"
       - id: cap-framework
         title: "Build a QuantConnect-style algorithm framework for your ETF universe"
+      - id: cap-longshort
+        title: "Build a long-short equity strategy from factor rankings"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture37-Long-Short-Equity.ipynb}
