@@ -1,0 +1,72 @@
+modules:
+  - id: python-foundations
+    title: "Python Foundations for Quant Work"
+    lessons:
+      - id: py-core
+        title: "Python core: types, control flow, functions, comprehensions"
+      - id: py-numpy
+        title: "NumPy: arrays, vectorization, broadcasting"
+      - id: py-pandas
+        title: "Pandas: Series/DataFrame, indexing, time series"
+      - id: py-viz
+        title: "Visualization: matplotlib basics for price/return series"
+
+  - id: stats-foundations
+    title: "Statistics & Probability Foundations"
+    lessons:
+      - id: st-descriptive
+        title: "Descriptive statistics and probability distributions"
+      - id: st-hypothesis
+        title: "Hypothesis testing and confidence intervals"
+      - id: st-ols
+        title: "Linear regression (OLS) from scratch and with statsmodels"
+      - id: st-stationarity
+        title: "Correlation vs causation; intro to stationarity"
+
+  - id: ml-foundations
+    title: "Machine Learning Foundations"
+    lessons:
+      - id: ml-traintest
+        title: "Train/test split, cross-validation, overfitting"
+      - id: ml-regression
+        title: "Regularized regression: Ridge, Lasso, Elastic Net"
+      - id: ml-classification
+        title: "Classification: logistic regression, trees, random forest"
+      - id: ml-eval
+        title: "Model evaluation metrics (finance-relevant: not just accuracy)"
+
+  - id: econometrics
+    title: "Time Series & Econometrics"
+    lessons:
+      - id: ec-stationarity
+        title: "Stationarity and the ADF test"
+      - id: ec-arima
+        title: "ARIMA / SARIMA modeling"
+      - id: ec-cointegration
+        title: "Cointegration and pairs trading"
+      - id: ec-garch
+        title: "Volatility modeling with GARCH"
+      - id: ec-factor
+        title: "Factor models (Fama-French style)"
+
+  - id: ml-finance
+    title: "ML Applied to Finance"
+    lessons:
+      - id: mf-features
+        title: "Feature engineering from price and fundamental data"
+      - id: mf-returns
+        title: "Return prediction models and lookahead bias"
+      - id: mf-walkforward
+        title: "Walk-forward validation for time series"
+      - id: mf-backtest
+        title: "Backtesting fundamentals and pitfalls"
+
+  - id: capstone
+    title: "Capstone Projects"
+    lessons:
+      - id: cap-momentum
+        title: "Build a momentum signal model for an ETF universe"
+      - id: cap-vol
+        title: "Build a volatility forecaster"
+      - id: cap-pairs
+        title: "Build a cointegration-based pairs-trading screener"

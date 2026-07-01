@@ -1,0 +1,9 @@
+textual
+ollama
+pandas
+numpy
+scikit-learn
+statsmodels
+matplotlib
+rich
+pyyaml
