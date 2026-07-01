@@ -31,6 +31,9 @@ OLLAMA_HOST=http://127.0.0.1:11434 ollama pull qwen2.5-coder:7b
 - Write code in the "Code Editor" tab, hit Run to execute it locally, then
   "Send output to tutor" to get it reviewed.
 - Mark a lesson complete and move to the next one when ready.
+- The "Progress" tab shows overall/per-module completion, total time spent,
+  and your current/longest day streak. A live session timer sits next to
+  the lesson header.
 
-Progress and per-lesson chat history are stored locally in
-`data/progress.json` (not committed to git).
+Progress, time spent per lesson, activity streaks, and per-lesson chat
+history are stored locally in `data/progress.json` (not committed to git).

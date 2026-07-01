@@ -5,6 +5,8 @@ once the model is pulled.
 """
 from __future__ import annotations
 
+import time
+
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
@@ -32,9 +34,21 @@ class TutorApp(App):
         width: 42;
         border-right: solid $accent;
     }
+    #header-row {
+        height: auto;
+        background: $boost;
+    }
     #lesson-header {
         padding: 0 1;
-        background: $boost;
+        width: 1fr;
+    }
+    #session-timer {
+        padding: 0 1;
+        width: auto;
+        color: $text-muted;
+    }
+    #progress-view {
+        padding: 1;
     }
     #chat-log {
         padding: 1;
@@ -56,6 +70,8 @@ class TutorApp(App):
         super().__init__()
         self.current_lesson_id = DEFAULT_LESSON_ID
         self.chat_buffer = ""
+        self.session_start = time.monotonic()
+        self.lesson_start: float | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -63,7 +79,9 @@ class TutorApp(App):
             with Vertical(id="sidebar"):
                 yield Tree("Curriculum", id="curriculum-tree")
             with Vertical():
-                yield Static("", id="lesson-header")
+                with Horizontal(id="header-row"):
+                    yield Static("", id="lesson-header")
+                    yield Static("Session: 00:00:00", id="session-timer")
                 with TabbedContent():
                     with TabPane("Tutor Chat", id="tab-chat"):
                         with VerticalScroll(id="chat-scroll"):
@@ -83,6 +101,9 @@ class TutorApp(App):
                             yield Button("Run", id="run-btn", variant="primary")
                             yield Button("Send output to tutor", id="send-btn")
                         yield RichLog(id="code-output", highlight=True, markup=True)
+                    with TabPane("Progress", id="tab-progress"):
+                        with VerticalScroll():
+                            yield Markdown("", id="progress-view")
                 with Horizontal():
                     yield Button("Mark lesson complete", id="complete-btn", variant="success")
                     yield Button("Next lesson →", id="next-btn")
@@ -91,7 +112,25 @@ class TutorApp(App):
     def on_mount(self) -> None:
         self.build_tree()
         self.load_lesson(self.current_lesson_id)
+        self.refresh_progress_view()
         self.run_worker(self.check_model(), exclusive=True)
+        self.set_interval(1.0, self.update_session_timer)
+
+    def update_session_timer(self) -> None:
+        elapsed = int(time.monotonic() - self.session_start)
+        h, rem = divmod(elapsed, 3600)
+        m, s = divmod(rem, 60)
+        self.query_one("#session-timer", Static).update(f"Session: {h:02d}:{m:02d}:{s:02d}")
+
+    async def action_quit(self) -> None:
+        self._flush_lesson_time()
+        self.exit()
+
+    def _flush_lesson_time(self) -> None:
+        if self.lesson_start is not None and self.current_lesson_id:
+            elapsed = time.monotonic() - self.lesson_start
+            progress.add_time(self.current_lesson_id, elapsed)
+        self.lesson_start = None
 
     async def check_model(self) -> None:
         ok = await agent.check_model_available()
@@ -126,7 +165,9 @@ class TutorApp(App):
         lesson = curriculum.find_lesson(lesson_id)
         if lesson is None:
             return
+        self._flush_lesson_time()
         self.current_lesson_id = lesson_id
+        self.lesson_start = time.monotonic()
         status = "done" if progress.is_complete(lesson_id) else "in progress"
         header = self.query_one("#lesson-header", Static)
         header.update(f"[b]{lesson.module_title}[/b] › {lesson.title}  ({status})")
@@ -188,6 +229,55 @@ class TutorApp(App):
     def _scroll_chat_to_end(self) -> None:
         self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
 
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.pane.id == "tab-progress":
+            self.refresh_progress_view()
+
+    def refresh_progress_view(self) -> None:
+        self.query_one("#progress-view", Markdown).update(self._render_progress_markdown())
+
+    @staticmethod
+    def _render_progress_markdown() -> str:
+        modules = curriculum.load_modules()
+        total = sum(len(m.lessons) for m in modules)
+        done = sum(1 for m in modules for l in m.lessons if progress.is_complete(l.id))
+        pct = int(100 * done / total) if total else 0
+        bar_len = 30
+        filled = int(bar_len * done / total) if total else 0
+        bar = "█" * filled + "░" * (bar_len - filled)
+
+        lines = [
+            "## Overall progress",
+            f"`{bar}` {done}/{total} lessons ({pct}%)",
+            "",
+            "## By module",
+        ]
+        for m in modules:
+            m_done = sum(1 for l in m.lessons if progress.is_complete(l.id))
+            lines.append(f"- **{m.title}**: {m_done}/{len(m.lessons)}")
+
+        total_seconds = progress.total_time_spent()
+        h, rem = divmod(int(total_seconds), 3600)
+        mins, _ = divmod(rem, 60)
+        lines += [
+            "",
+            "## Time & streaks",
+            f"- Total time spent: {h}h {mins}m",
+            f"- Current streak: {progress.current_streak()} day(s)",
+            f"- Longest streak: {progress.longest_streak()} day(s)",
+        ]
+
+        remaining = [l for m in modules for l in m.lessons if not progress.is_complete(l.id)]
+        if remaining:
+            lines.append("")
+            lines.append(f"## Remaining lessons ({len(remaining)})")
+            for l in remaining:
+                lines.append(f"- {l.module_title}: {l.title}")
+        else:
+            lines.append("\nAll lessons complete!")
+
+        return "\n".join(lines)
+
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-btn":
             self.run_code()
@@ -197,6 +287,7 @@ class TutorApp(App):
             progress.mark_complete(self.current_lesson_id)
             self.refresh_tree()
             self.load_lesson(self.current_lesson_id)
+            self.refresh_progress_view()
         elif event.button.id == "next-btn":
             nxt = curriculum.next_lesson(self.current_lesson_id)
             if nxt:

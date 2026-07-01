@@ -1,7 +1,8 @@
-"""Local persistence of lesson completion and per-lesson chat history."""
+"""Local persistence of lesson completion, chat history, and time/streak tracking."""
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "progress.json"
@@ -9,8 +10,14 @@ DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "progress.json"
 
 def _load() -> dict:
     if DATA_PATH.exists():
-        return json.loads(DATA_PATH.read_text())
-    return {"completed": [], "history": {}}
+        state = json.loads(DATA_PATH.read_text())
+    else:
+        state = {}
+    state.setdefault("completed", [])
+    state.setdefault("history", {})
+    state.setdefault("time_spent", {})
+    state.setdefault("activity_dates", [])
+    return state
 
 
 def _save(state: dict) -> None:
@@ -49,3 +56,51 @@ def clear_history(lesson_id: str) -> None:
     state = _load()
     state["history"].pop(lesson_id, None)
     _save(state)
+
+
+def add_time(lesson_id: str, seconds: float) -> None:
+    if seconds <= 0:
+        return
+    state = _load()
+    state["time_spent"][lesson_id] = state["time_spent"].get(lesson_id, 0.0) + seconds
+    today = date.today().isoformat()
+    if today not in state["activity_dates"]:
+        state["activity_dates"].append(today)
+    _save(state)
+
+
+def get_time_spent(lesson_id: str) -> float:
+    return _load()["time_spent"].get(lesson_id, 0.0)
+
+
+def total_time_spent() -> float:
+    return sum(_load()["time_spent"].values())
+
+
+def current_streak() -> int:
+    dates = {date.fromisoformat(d) for d in _load()["activity_dates"]}
+    if not dates:
+        return 0
+    today = date.today()
+    cursor = today if today in dates else today - timedelta(days=1)
+    if cursor not in dates:
+        return 0
+    streak = 0
+    while cursor in dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+    return streak
+
+
+def longest_streak() -> int:
+    dates = sorted(date.fromisoformat(d) for d in _load()["activity_dates"])
+    if not dates:
+        return 0
+    longest = current = 1
+    for prev, curr in zip(dates, dates[1:]):
+        if (curr - prev).days == 1:
+            current += 1
+        else:
+            current = 1
+        longest = max(longest, current)
+    return longest
