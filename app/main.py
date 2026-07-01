@@ -1,6 +1,6 @@
 """Offline terminal tutor for ML in finance / econometrics / quant finance.
 
-Runs entirely locally via Ollama + Qwen2.5-Coder-7B. No network required
+Runs entirely locally via Ollama + Qwen2.5-7B-Instruct. No network required
 once the model is pulled.
 """
 from __future__ import annotations

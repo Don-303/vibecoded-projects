@@ -1,17 +1,21 @@
-"""Wraps the local Ollama Qwen2.5-Coder model as an interactive tutor."""
+"""Wraps a local Ollama model as an interactive tutor."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
 from ollama import AsyncClient
 
-MODEL = "qwen2.5-coder:7b"
+# General-purpose instruct model rather than the Coder variant: this tutor
+# mostly explains concepts (econometrics, portfolio theory, etc.) and only
+# secondarily reviews code, and Qwen2.5-Coder is specialized away from that
+# broader reasoning/knowledge in favor of code benchmarks.
+MODEL = "qwen2.5:7b-instruct"
 
 # Force the local instance regardless of any OLLAMA_HOST pointed at a remote
 # peer in the user's shell environment -- this app must work fully offline.
 _client = AsyncClient(host="http://127.0.0.1:11434")
 
-SYSTEM_TEMPLATE = """You are an interactive, patient coding tutor teaching machine \
+SYSTEM_TEMPLATE = """You are an interactive, patient tutor teaching machine \
 learning for finance, econometrics, and quantitative finance. You are running \
 fully offline as a local 7B model, so keep explanations concise and concrete -- \
 prefer short explanations plus a small runnable code exercise over long essays.
