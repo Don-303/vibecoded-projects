@@ -42,19 +42,34 @@ to the local instance regardless of that env var.
 
 ## Curriculum order
 
-9 modules, 41 lessons, covering the full breadth of what a quantitative
-analyst needs:
+10 modules, 62 lessons, covering the full breadth of what a quantitative
+analyst needs. Several modules were shaped directly off real MSc Financial
+Engineering coursework (CE889 Neural Networks, CE802 Machine Learning,
+CF969 Machine Learning in Finance — see
+`~/GoogleDrive/MSc Financial Engineering/Courses`), plus a few concepts
+borrowed from QuantConnect's algorithm framework (universe selection →
+alpha → portfolio construction → risk → execution; realistic fill/slippage
+modeling):
 
 1. Python foundations (core/NumPy/pandas/viz)
 2. Math foundations (linear algebra, probability/stochastic processes,
    optimization)
 3. Statistics & probability
-4. ML foundations (through deep learning for sequences + NLP for alt-data)
-5. Time series & econometrics (ARIMA, cointegration, GARCH, factor models)
-6. Financial theory (MPT/CAPM, derivatives pricing, fixed income, market
-   microstructure, risk management)
-7. ML applied to finance (features, lookahead bias, walk-forward validation)
-8. Engineering practices (SQL/large datasets, backtesting discipline,
+4. ML foundations — classical ML from CE802: bias-variance, Bayesian
+   learning, k-NN, SVM, clustering, ensembles, evaluation, reinforcement
+   learning
+5. Neural Networks & Deep Learning (new dedicated module, from CE889 +
+   CF969): gradient descent, perceptron/XOR, MLP/backprop, regularization,
+   CNNs, RNN/LSTM, transformers, SOM/ART
+6. Time series & econometrics (ARIMA, cointegration, GARCH, factor models)
+7. Financial theory (MPT/CAPM, portfolio construction models, derivatives
+   pricing, fixed income, market microstructure, risk management)
+8. ML applied to finance (features, lookahead bias, LSTM fusion of
+   technical/fundamental data, NLP for alt-data, ML-based trade execution,
+   walk-forward validation, backtesting)
+9. Engineering practices (SQL/large datasets, algorithm framework design,
+   realistic fill/slippage/fee models, backtesting discipline,
    reproducibility/production)
-9. Capstone projects tied to real strategies (momentum, volatility
-   forecasting, pairs trading, options pricing, portfolio risk models)
+10. Capstone projects tied to real strategies (momentum, volatility
+    forecasting, pairs trading, options pricing, portfolio risk models,
+    LSTM fusion model, QuantConnect-style algorithm framework)

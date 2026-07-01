@@ -40,16 +40,46 @@ modules:
     lessons:
       - id: ml-traintest
         title: "Train/test split, cross-validation, overfitting"
+      - id: ml-bias-variance
+        title: "Bias-variance tradeoff and model complexity"
       - id: ml-regression
         title: "Regularized regression: Ridge, Lasso, Elastic Net"
       - id: ml-classification
         title: "Classification: logistic regression, trees, random forest"
+      - id: ml-bayesian
+        title: "Bayesian learning and naive Bayes"
+      - id: ml-knn
+        title: "Instance-based learning: k-Nearest Neighbors"
+      - id: ml-svm
+        title: "Support Vector Machines"
+      - id: ml-clustering
+        title: "Unsupervised learning: k-means and hierarchical clustering"
+      - id: ml-ensembles
+        title: "Ensemble methods: bagging, boosting, multiple models"
       - id: ml-eval
         title: "Model evaluation metrics (finance-relevant: not just accuracy)"
-      - id: ml-deeplearning
-        title: "Deep learning for sequences: RNNs/LSTMs and transformers"
-      - id: ml-nlp
-        title: "NLP for alternative data: sentiment from news and filings"
+      - id: ml-reinforcement
+        title: "Reinforcement learning fundamentals and trading applications"
+
+  - id: neural-networks
+    title: "Neural Networks & Deep Learning"
+    lessons:
+      - id: nn-gradient-descent
+        title: "Differentiation basics and gradient descent"
+      - id: nn-perceptron
+        title: "The perceptron and the XOR problem"
+      - id: nn-mlp-backprop
+        title: "Multi-layer perceptrons and backpropagation"
+      - id: nn-improvements
+        title: "Improving training: regularization, dropout, batch norm"
+      - id: nn-cnn
+        title: "Convolutional neural networks (CNNs)"
+      - id: nn-rnn-lstm
+        title: "Recurrent networks and LSTMs for sequential/time-series data"
+      - id: nn-transformers
+        title: "Transformers: architecture, training, and inference"
+      - id: nn-unsupervised
+        title: "Unsupervised neural nets: Self-Organizing Maps and ART"
 
   - id: econometrics
     title: "Time Series & Econometrics"
@@ -72,6 +102,8 @@ modules:
         title: "Modern Portfolio Theory and the efficient frontier"
       - id: fin-capm
         title: "CAPM and Arbitrage Pricing Theory"
+      - id: fin-portfolio-construction
+        title: "Portfolio construction models: equal-weight, mean-variance, risk parity, Black-Litterman"
       - id: fin-derivatives
         title: "Derivatives pricing: Black-Scholes, binomial trees, the Greeks"
       - id: fin-fixedincome
@@ -88,6 +120,12 @@ modules:
         title: "Feature engineering from price and fundamental data"
       - id: mf-returns
         title: "Return prediction models and lookahead bias"
+      - id: mf-lstm-fusion
+        title: "Combining technical and fundamental data with LSTM"
+      - id: mf-nlp-altdata
+        title: "NLP for alternative data: sentiment from news and filings"
+      - id: mf-trade-execution
+        title: "Optimal trade execution using ML and linear programming"
       - id: mf-walkforward
         title: "Walk-forward validation for time series"
       - id: mf-backtest
@@ -98,6 +136,10 @@ modules:
     lessons:
       - id: eng-sql
         title: "SQL and handling large panel/tick datasets efficiently"
+      - id: eng-algo-framework
+        title: "Algorithm framework design: universe selection, alpha, portfolio construction, risk, execution"
+      - id: eng-fill-models
+        title: "Realistic backtesting mechanics: fill models, slippage, and fee models"
       - id: eng-backtest-discipline
         title: "Backtesting discipline: survivorship bias, overfitting, realistic costs"
       - id: eng-reproducibility
@@ -116,3 +158,7 @@ modules:
         title: "Build an option pricing/Greeks calculator with an implied vol surface"
       - id: cap-risk
         title: "Build a portfolio risk model (VaR/CVaR) across a multi-asset book"
+      - id: cap-lstm
+        title: "Build an LSTM model fusing technical and fundamental signals"
+      - id: cap-framework
+        title: "Build a QuantConnect-style algorithm framework for your ETF universe"
