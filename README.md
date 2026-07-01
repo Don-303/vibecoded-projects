@@ -21,6 +21,12 @@ OLLAMA_HOST=http://127.0.0.1:11434 ollama pull qwen2.5-coder:7b
 .venv/bin/python -m app.main
 ```
 
+Or launch it from your desktop's application menu as **Quant Tutor** — a
+`.desktop` entry is installed at
+`~/.local/share/applications/quant-tutor.desktop`, which runs `bin/quant-tutor`
+in a terminal. That script checks the venv and local Ollama are ready before
+starting the app.
+
 ## How it works
 
 - Pick a lesson from the tree on the left (curriculum runs Python/NumPy/

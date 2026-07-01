@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Launcher for the quant-tutor TUI. Meant to be run inside a terminal
+# (see quant-tutor.desktop, which sets Terminal=true).
+set -euo pipefail
+
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$PROJECT_DIR/.venv/bin/python"
+
+if [[ ! -x "$PYTHON" ]]; then
+    echo "quant-tutor: venv not found at $PROJECT_DIR/.venv" >&2
+    echo "Run: python3.12 -m venv \"$PROJECT_DIR/.venv\" && \"$PROJECT_DIR/.venv/bin/pip\" install -r \"$PROJECT_DIR/requirements.txt\"" >&2
+    read -r -p "Press enter to close..."
+    exit 1
+fi
+
+if ! curl -s -m 2 http://127.0.0.1:11434/ >/dev/null 2>&1; then
+    echo "quant-tutor: local Ollama service isn't responding on 127.0.0.1:11434." >&2
+    echo "Start it with: systemctl start ollama" >&2
+    read -r -p "Press enter to close..."
+    exit 1
+fi
+
+cd "$PROJECT_DIR"
+exec "$PYTHON" -m app.main
