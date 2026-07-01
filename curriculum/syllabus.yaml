@@ -11,6 +11,18 @@ modules:
       - id: py-viz
         title: "Visualization: matplotlib basics for price/return series"
 
+  - id: math-foundations
+    title: "Math Foundations for Quant Finance"
+    lessons:
+      - id: mth-linalg
+        title: "Linear algebra: matrix ops, eigenvalues/eigenvectors, PCA"
+      - id: mth-prob
+        title: "Probability & stochastic processes: Brownian motion, Markov chains"
+      - id: mth-calc
+        title: "Stochastic calculus intuition: Ito's lemma (conceptual)"
+      - id: mth-optim
+        title: "Optimization: convex optimization and Lagrange multipliers"
+
   - id: stats-foundations
     title: "Statistics & Probability Foundations"
     lessons:
@@ -34,6 +46,10 @@ modules:
         title: "Classification: logistic regression, trees, random forest"
       - id: ml-eval
         title: "Model evaluation metrics (finance-relevant: not just accuracy)"
+      - id: ml-deeplearning
+        title: "Deep learning for sequences: RNNs/LSTMs and transformers"
+      - id: ml-nlp
+        title: "NLP for alternative data: sentiment from news and filings"
 
   - id: econometrics
     title: "Time Series & Econometrics"
@@ -49,6 +65,22 @@ modules:
       - id: ec-factor
         title: "Factor models (Fama-French style)"
 
+  - id: financial-theory
+    title: "Financial Theory"
+    lessons:
+      - id: fin-mpt
+        title: "Modern Portfolio Theory and the efficient frontier"
+      - id: fin-capm
+        title: "CAPM and Arbitrage Pricing Theory"
+      - id: fin-derivatives
+        title: "Derivatives pricing: Black-Scholes, binomial trees, the Greeks"
+      - id: fin-fixedincome
+        title: "Fixed income: yield curves, duration and convexity"
+      - id: fin-microstructure
+        title: "Market microstructure: order books, liquidity, transaction costs"
+      - id: fin-risk
+        title: "Risk management: VaR, CVaR, stress testing, drawdown analysis"
+
   - id: ml-finance
     title: "ML Applied to Finance"
     lessons:
@@ -61,6 +93,16 @@ modules:
       - id: mf-backtest
         title: "Backtesting fundamentals and pitfalls"
 
+  - id: engineering-practices
+    title: "Engineering Practices for Quant Work"
+    lessons:
+      - id: eng-sql
+        title: "SQL and handling large panel/tick datasets efficiently"
+      - id: eng-backtest-discipline
+        title: "Backtesting discipline: survivorship bias, overfitting, realistic costs"
+      - id: eng-reproducibility
+        title: "Reproducibility, version control, and production deployment awareness"
+
   - id: capstone
     title: "Capstone Projects"
     lessons:
@@ -70,3 +112,7 @@ modules:
         title: "Build a volatility forecaster"
       - id: cap-pairs
         title: "Build a cointegration-based pairs-trading screener"
+      - id: cap-options
+        title: "Build an option pricing/Greeks calculator with an implied vol surface"
+      - id: cap-risk
+        title: "Build a portfolio risk model (VaR/CVaR) across a multi-asset book"
