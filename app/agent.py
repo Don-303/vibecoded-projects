@@ -19,6 +19,16 @@ MODEL = "qwen2.5:7b-instruct"
 # the full window on CPU-only inference.
 NUM_CTX = 8192
 
+# This machine is CPU-only (12 threads, hybrid P/E cores) with no GPU
+# acceleration available to Ollama. Two changes matter a lot here:
+# - KEEP_ALIVE: Ollama's default unload-after-5-min-idle causes a slow cold
+#   reload (~1-2 min) on the next message. Keep it loaded for a full session.
+# - NUM_THREAD: llama.cpp's default thread count under-uses this CPU (we
+#   observed ~2 cores active during inference); leave 2 threads free for the
+#   OS/UI rather than requesting all 12.
+KEEP_ALIVE = "30m"
+NUM_THREAD = 10
+
 # Force the local instance regardless of any OLLAMA_HOST pointed at a remote
 # peer in the user's shell environment -- this app must work fully offline.
 _client = AsyncClient(host="http://127.0.0.1:11434")
@@ -110,7 +120,11 @@ async def stream_reply(lesson: Lesson, history: list[dict], user_message: str) -
     messages.append({"role": "user", "content": user_message})
 
     async for chunk in await _client.chat(
-        model=MODEL, messages=messages, stream=True, options={"num_ctx": NUM_CTX}
+        model=MODEL,
+        messages=messages,
+        stream=True,
+        options={"num_ctx": NUM_CTX, "num_thread": NUM_THREAD},
+        keep_alive=KEEP_ALIVE,
     ):
         content = chunk.get("message", {}).get("content", "")
         if content:

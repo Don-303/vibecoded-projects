@@ -13,6 +13,9 @@ import numpy as np
 from ollama import AsyncClient, Client
 
 EMBED_MODEL = "nomic-embed-text"
+# Avoid a cold reload between chat turns on this CPU-only machine (see
+# app/agent.py's KEEP_ALIVE for the same reasoning).
+EMBED_KEEP_ALIVE = "30m"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = PROJECT_ROOT / "corpus"
@@ -85,7 +88,9 @@ async def retrieve(query: str, top_k: int = 4, min_similarity: float = 0.4) -> l
         return []
     embeddings, chunks = loaded
     try:
-        resp = await _async_client.embed(model=EMBED_MODEL, input=query)
+        resp = await _async_client.embed(
+            model=EMBED_MODEL, input=query, keep_alive=EMBED_KEEP_ALIVE
+        )
     except Exception:
         return []
     q = np.array(resp.embeddings[0], dtype=np.float32)
