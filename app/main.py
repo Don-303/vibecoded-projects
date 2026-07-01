@@ -6,6 +6,7 @@ once the model is pulled.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 from textual.app import App, ComposeResult
@@ -94,6 +95,11 @@ class TutorApp(App):
                             placeholder="Ask the tutor, or paste code/output for review...",
                             id="chat-input",
                         )
+                        with Horizontal(id="chat-actions"):
+                            yield Button("Quiz me", id="quiz-btn")
+                            yield Button("Practice exercise", id="practice-btn")
+                            yield Button("Worked example", id="example-btn")
+                            yield Button("Code → editor", id="to-editor-btn")
                     with TabPane("Code Editor", id="tab-code"):
                         yield TextArea(
                             "",
@@ -118,7 +124,7 @@ class TutorApp(App):
         self.build_tree()
         self.load_lesson(self.current_lesson_id)
         self.refresh_progress_view()
-        self.run_worker(self.check_model(), exclusive=True)
+        self.run_worker(self.check_model(), group="model-check")
         self.set_interval(1.0, self.update_session_timer)
 
     def update_session_timer(self) -> None:
@@ -158,6 +164,10 @@ class TutorApp(App):
                 severity="error",
                 timeout=10,
             )
+            return
+        # Load the model now, while the user is still picking a lesson,
+        # instead of making the first message pay the cold-load wait.
+        await agent.warm_up()
 
     def build_tree(self) -> None:
         tree = self.query_one("#curriculum-tree", Tree)
@@ -191,8 +201,20 @@ class TutorApp(App):
 
         history = progress.get_history(lesson_id)
         self.chat_buffer = self._render_history(history)
-        self.query_one("#chat-log", Markdown).update(self.chat_buffer or "*No conversation yet. Say hi to start the lesson.*")
+        chat_log = self.query_one("#chat-log", Markdown)
         self.query_one("#code-output", RichLog).clear()
+        if history:
+            chat_log.update(self.chat_buffer)
+        else:
+            # Fresh lesson: have the tutor open it instead of waiting for the
+            # student to say something. Only the tutor's intro is persisted,
+            # so the canned opener doesn't clutter the visible history.
+            chat_log.update("*Starting lesson...*")
+            self.run_worker(
+                self.stream_tutor_reply(lesson, [], agent.AUTO_START_MESSAGE),
+                group="tutor-stream",
+                exclusive=True,
+            )
 
     @staticmethod
     def _render_history(history: list[dict]) -> str:
@@ -215,18 +237,21 @@ class TutorApp(App):
         lesson = curriculum.find_lesson(self.current_lesson_id)
         if lesson is None:
             return
+        history = progress.get_history(self.current_lesson_id)
         progress.append_history(self.current_lesson_id, "user", message)
         self.chat_buffer += f"\n\n---\n\n**You**:\n\n{message}\n"
         chat_log = self.query_one("#chat-log", Markdown)
         await chat_log.update(self.chat_buffer)
         self._scroll_chat_to_end()
-        self.run_worker(self.stream_tutor_reply(lesson), exclusive=True)
+        self.run_worker(
+            self.stream_tutor_reply(lesson, history, message),
+            group="tutor-stream",
+            exclusive=True,
+        )
 
-    async def stream_tutor_reply(self, lesson) -> None:
-        history = progress.get_history(self.current_lesson_id)[:-1]
-        user_message = progress.get_history(self.current_lesson_id)[-1]["content"]
-
-        self.chat_buffer += "\n\n---\n\n**Tutor**:\n\n"
+    async def stream_tutor_reply(self, lesson, history: list[dict], user_message: str) -> None:
+        separator = "\n\n---\n\n" if self.chat_buffer else ""
+        self.chat_buffer += f"{separator}**Tutor**:\n\n"
         reply_so_far = ""
         chat_log = self.query_one("#chat-log", Markdown)
         # Re-parsing the whole markdown document per token is O(n^2) over the
@@ -318,6 +343,39 @@ class TutorApp(App):
             progress.clear_history(self.current_lesson_id)
             self.load_lesson(self.current_lesson_id)
             self.notify("Lesson conversation cleared.")
+        elif event.button.id == "quiz-btn":
+            await self.send_to_tutor(
+                "Quiz me on what we've covered so far in this lesson: ask me "
+                "one short question at a time and check my answer before the next."
+            )
+        elif event.button.id == "practice-btn":
+            await self.send_to_tutor(
+                "Give me a practice exercise for this lesson: skeleton Python "
+                "code with TODO comments where I fill in the key parts, plus a "
+                "short description of what the finished code should print."
+            )
+        elif event.button.id == "example-btn":
+            await self.send_to_tutor(
+                "Show me a complete worked example for the current concept: "
+                "full runnable Python code with a brief walkthrough of each "
+                "step and what the output means."
+            )
+        elif event.button.id == "to-editor-btn":
+            self.copy_last_code_to_editor()
+
+    def copy_last_code_to_editor(self) -> None:
+        """Pull the most recent ```python block from the tutor's replies into
+        the code editor, so exercises are one click from runnable."""
+        for turn in reversed(progress.get_history(self.current_lesson_id)):
+            if turn["role"] != "assistant":
+                continue
+            blocks = re.findall(r"```(?:python|py)?\n(.*?)```", turn["content"], re.DOTALL)
+            if blocks:
+                self.query_one("#code-editor", TextArea).text = blocks[-1].strip() + "\n"
+                self.query_one(TabbedContent).active = "tab-code"
+                self.notify("Code copied to editor — Ctrl+R to run.")
+                return
+        self.notify("No code block found in the tutor's replies yet.", severity="warning")
 
     def run_code(self) -> None:
         self.run_worker(self._run_code_worker(), exclusive=True, group="run-code")

@@ -39,6 +39,14 @@ to the local instance regardless of that env var.
   `SOURCE_LESSON_TEMPLATE`); otherwise falls back to fuzzy retrieval via
   `app/rag.py` (see `REFERENCE_TEMPLATE`). Sets `num_ctx=8192` explicitly
   (Ollama's runtime default is much smaller than the model's 32k max).
+  CPU-latency measures that must not be regressed: `keep_alive=30m` +
+  `warm_up()` at app start (avoids ~2 min cold loads), `num_thread=10`,
+  `num_predict=640`, and — most importantly — the per-lesson memoized
+  prompt block (`_lesson_extra_block`): the system prompt must stay
+  byte-identical across turns within a lesson so llama.cpp's prefix cache
+  skips re-prefilling the conversation (measured: 81.5s → 1.7s to first
+  token on the second message). Retrieval is therefore keyed on the lesson
+  title only, never the user's message.
 - `app/rag.py` — the corpus registry (`SOURCES`), the local embedding index
   (`retrieve()`, backed by `nomic-embed-text` + a numpy cosine-similarity
   search over `data/rag_index/`), and full-lecture-text loading

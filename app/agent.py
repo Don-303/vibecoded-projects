@@ -29,6 +29,11 @@ NUM_CTX = 8192
 KEEP_ALIVE = "30m"
 NUM_THREAD = 10
 
+# Bound reply length: the tutor is instructed to be concise, and on CPU each
+# extra token is latency. 640 tokens comfortably fits an explanation plus a
+# code exercise.
+NUM_PREDICT = 640
+
 # Force the local instance regardless of any OLLAMA_HOST pointed at a remote
 # peer in the user's shell environment -- this app must work fully offline.
 _client = AsyncClient(host="http://127.0.0.1:11434")
@@ -46,12 +51,21 @@ Teaching approach:
 - Give the student one small, concrete coding exercise to try, using a real \
   or synthetic finance/econometrics dataset where relevant (e.g. price series, \
   returns, factor data). Prefer numpy/pandas/statsmodels/scikit-learn.
+- Exercises should be skeleton code with TODO comments marking the parts the \
+  student fills in; worked examples should be complete, runnable as-is (use \
+  np.random with a seed for synthetic data -- never require CSV files the \
+  student doesn't have), with a brief note on what the output shows.
 - When the student pastes code or its output, review it directly: point out \
   bugs, misconceptions, or ways to improve it. Be specific about lines/values.
 - Only move to a harder exercise once the current one basically works.
 - If the student asks to move on or says they're done, summarize the key \
   takeaway in 1-2 sentences.
+- End every reply with either a short question checking understanding or a \
+  concrete task -- never a dead end.
 """
+
+# Sent on the student's behalf when they open a lesson with no history yet.
+AUTO_START_MESSAGE = "Please introduce this lesson and give me the first exercise."
 
 REFERENCE_TEMPLATE = """
 
@@ -107,11 +121,29 @@ def _build_source_lesson_block(lesson: Lesson) -> str:
     )
 
 
+# Memoized per-lesson prompt block. Keeping the system prompt byte-identical
+# across turns within a lesson lets llama.cpp's prefix cache reuse the
+# prefilled system prompt + history instead of re-processing the whole
+# conversation every message -- on CPU that's the difference between a
+# follow-up reply starting in seconds vs. re-paying a 30-60s prefill. This is
+# why retrieval is keyed on the lesson title only, not the user's message.
+_lesson_block_cache: dict[str, str] = {}
+
+
+async def _lesson_extra_block(lesson: Lesson) -> str:
+    cached = _lesson_block_cache.get(lesson.id)
+    if cached is not None:
+        return cached
+    block = _build_source_lesson_block(lesson)
+    if not block:
+        retrieved = await rag.retrieve(lesson.title)
+        block = _build_reference_block(retrieved)
+    _lesson_block_cache[lesson.id] = block
+    return block
+
+
 async def stream_reply(lesson: Lesson, history: list[dict], user_message: str) -> AsyncIterator[str]:
-    extra_block = _build_source_lesson_block(lesson)
-    if not extra_block:
-        retrieved = await rag.retrieve(f"{lesson.title}. {user_message}")
-        extra_block = _build_reference_block(retrieved)
+    extra_block = await _lesson_extra_block(lesson)
 
     messages = [
         {"role": "system", "content": system_prompt(lesson.module_title, lesson.title, extra_block)}
@@ -123,12 +155,21 @@ async def stream_reply(lesson: Lesson, history: list[dict], user_message: str) -
         model=MODEL,
         messages=messages,
         stream=True,
-        options={"num_ctx": NUM_CTX, "num_thread": NUM_THREAD},
+        options={"num_ctx": NUM_CTX, "num_thread": NUM_THREAD, "num_predict": NUM_PREDICT},
         keep_alive=KEEP_ALIVE,
     ):
         content = chunk.get("message", {}).get("content", "")
         if content:
             yield content
+
+
+async def warm_up() -> None:
+    """Load the chat model into memory without generating anything, so the
+    first real message doesn't pay the ~1-2 min cold-load on this machine."""
+    try:
+        await _client.chat(model=MODEL, messages=[], keep_alive=KEEP_ALIVE)
+    except Exception:
+        pass  # check_model_available() surfaces real problems to the user
 
 
 async def check_model_available() -> bool:
