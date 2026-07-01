@@ -82,6 +82,22 @@ def is_available() -> bool:
     return _load() is not None
 
 
+# Every QuantRocket notebook opens with the same logo/copyright/breadcrumb
+# cells; they carry no teaching content but embed close to finance queries
+# (they mention the lecture title), so filter them out of prompts and results.
+_BOILERPLATE_MARKERS = (
+    "notebook-header-logo",
+    "© Copyright Quantopian Inc",
+    "quantrocket.com/disclaimer",
+)
+
+
+def _is_boilerplate(text: str) -> bool:
+    return any(marker in text for marker in _BOILERPLATE_MARKERS) or (
+        text.startswith("***") and "](Introduction.ipynb)" in text
+    )
+
+
 async def retrieve(query: str, top_k: int = 4, min_similarity: float = 0.4) -> list[Chunk]:
     loaded = _load()
     if loaded is None:
@@ -99,8 +115,14 @@ async def retrieve(query: str, top_k: int = 4, min_similarity: float = 0.4) -> l
     e_norm = embeddings / (np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
     sims = e_norm @ q_norm
 
-    top_idx = np.argsort(-sims)[:top_k]
-    return [chunks[i] for i in top_idx if sims[i] >= min_similarity]
+    # Over-fetch so boilerplate filtering doesn't shrink the result set.
+    top_idx = np.argsort(-sims)[: top_k + 8]
+    results = [
+        chunks[i]
+        for i in top_idx
+        if sims[i] >= min_similarity and not _is_boilerplate(chunks[i].text)
+    ]
+    return results[:top_k]
 
 
 def find_source_file(source_repo: str, source_file: str) -> Path | None:
@@ -118,7 +140,7 @@ def _notebook_full_text(path: Path, max_chars: int) -> str:
         source = cell.get("source", "")
         text = "".join(source) if isinstance(source, list) else source
         text = text.strip()
-        if not text:
+        if not text or _is_boilerplate(text):
             continue
         parts.append(f"```python\n{text}\n```" if cell.get("cell_type") == "code" else text)
     return "\n\n".join(parts)[:max_chars]

@@ -5,6 +5,7 @@ once the model is pulled.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from textual.app import App, ComposeResult
@@ -64,6 +65,8 @@ class TutorApp(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+r", "run_code", "Run code"),
+        ("ctrl+n", "next_lesson", "Next lesson"),
     ]
 
     def __init__(self) -> None:
@@ -72,6 +75,7 @@ class TutorApp(App):
         self.chat_buffer = ""
         self.session_start = time.monotonic()
         self.lesson_start: float | None = None
+        self.last_run_result: sandbox.RunResult | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -107,6 +111,7 @@ class TutorApp(App):
                 with Horizontal():
                     yield Button("Mark lesson complete", id="complete-btn", variant="success")
                     yield Button("Next lesson →", id="next-btn")
+                    yield Button("Reset lesson chat", id="reset-btn", variant="warning")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -121,16 +126,28 @@ class TutorApp(App):
         h, rem = divmod(elapsed, 3600)
         m, s = divmod(rem, 60)
         self.query_one("#session-timer", Static).update(f"Session: {h:02d}:{m:02d}:{s:02d}")
+        # Checkpoint tracked time every minute so closing the terminal
+        # abruptly (instead of ctrl+q) loses at most a minute.
+        if elapsed and elapsed % 60 == 0:
+            self._flush_lesson_time(restart=True)
 
     async def action_quit(self) -> None:
         self._flush_lesson_time()
         self.exit()
 
-    def _flush_lesson_time(self) -> None:
+    def action_run_code(self) -> None:
+        self.run_code()
+
+    def action_next_lesson(self) -> None:
+        nxt = curriculum.next_lesson(self.current_lesson_id)
+        if nxt:
+            self.load_lesson(nxt.id)
+
+    def _flush_lesson_time(self, restart: bool = False) -> None:
         if self.lesson_start is not None and self.current_lesson_id:
             elapsed = time.monotonic() - self.lesson_start
             progress.add_time(self.current_lesson_id, elapsed)
-        self.lesson_start = None
+        self.lesson_start = time.monotonic() if restart else None
 
     async def check_model(self) -> None:
         ok = await agent.check_model_available()
@@ -212,16 +229,23 @@ class TutorApp(App):
         self.chat_buffer += "\n\n---\n\n**Tutor**:\n\n"
         reply_so_far = ""
         chat_log = self.query_one("#chat-log", Markdown)
+        # Re-parsing the whole markdown document per token is O(n^2) over the
+        # conversation and competes with Ollama for CPU; render at most ~4x/s.
+        last_render = 0.0
         try:
             async for token in agent.stream_reply(lesson, history, user_message):
                 reply_so_far += token
-                await chat_log.update(self.chat_buffer + reply_so_far)
-                self._scroll_chat_to_end()
+                now = time.monotonic()
+                if now - last_render >= 0.25:
+                    last_render = now
+                    await chat_log.update(self.chat_buffer + reply_so_far)
+                    self._scroll_chat_to_end()
         except Exception as exc:
             reply_so_far = f"_Error talking to local model: {exc}_"
-            await chat_log.update(self.chat_buffer + reply_so_far)
 
         self.chat_buffer += reply_so_far
+        await chat_log.update(self.chat_buffer)
+        self._scroll_chat_to_end()
         progress.append_history(self.current_lesson_id, "assistant", reply_so_far)
 
     def _scroll_chat_to_end(self) -> None:
@@ -290,12 +314,23 @@ class TutorApp(App):
             nxt = curriculum.next_lesson(self.current_lesson_id)
             if nxt:
                 self.load_lesson(nxt.id)
+        elif event.button.id == "reset-btn":
+            progress.clear_history(self.current_lesson_id)
+            self.load_lesson(self.current_lesson_id)
+            self.notify("Lesson conversation cleared.")
 
     def run_code(self) -> None:
+        self.run_worker(self._run_code_worker(), exclusive=True, group="run-code")
+
+    async def _run_code_worker(self) -> None:
         code = self.query_one("#code-editor", TextArea).text
         output_log = self.query_one("#code-output", RichLog)
         output_log.clear()
-        result = sandbox.run_code(code)
+        output_log.write("[dim]running...[/dim]")
+        # Subprocess call blocks up to sandbox.TIMEOUT_SECONDS; keep the UI alive.
+        result = await asyncio.to_thread(sandbox.run_code, code)
+        self.last_run_result = result
+        output_log.clear()
         if result.stdout:
             output_log.write(result.stdout)
         if result.stderr:
@@ -305,9 +340,12 @@ class TutorApp(App):
 
     async def send_code_output_to_tutor(self) -> None:
         code = self.query_one("#code-editor", TextArea).text
-        output_log = self.query_one("#code-output", RichLog)
-        lines = output_log.lines
-        output_text = "\n".join(str(line) for line in lines) if lines else "(no output captured)"
+        result = self.last_run_result
+        if result is None:
+            output_text = "(code has not been run yet)"
+        else:
+            output_text = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
+            output_text = output_text or "(no output)"
         message = f"Here is my code:\n```python\n{code}\n```\n\nOutput:\n```\n{output_text}\n```"
         self.query_one(TabbedContent).active = "tab-chat"
         await self.send_to_tutor(message)
