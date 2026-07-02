@@ -31,12 +31,17 @@ starting the app.
 
 - Pick a lesson from the tree on the left (curriculum runs Python/NumPy/
   Pandas → statistics → ML foundations → econometrics → ML-for-finance →
-  capstone projects).
-- Chat with the tutor in the "Tutor Chat" tab — it introduces the concept
-  and gives you an exercise.
-- Write code in the "Code Editor" tab, hit Run to execute it locally, then
-  "Send output to tutor" to get it reviewed.
-- Mark a lesson complete and move to the next one when ready.
+  capstone projects). Modules collapse/expand; only the one you're studying
+  starts open. Ctrl+B hides the sidebar entirely.
+- The workspace shows the tutor chat and the code editor side by side
+  (Ctrl+E hides/shows the editor pane). Opening a fresh lesson auto-starts
+  it: the tutor introduces the concept and gives you an exercise.
+- Chat action buttons: "Quiz me", "Practice exercise" (skeleton code with
+  TODOs), "Worked example" (complete runnable code), and "Code → editor"
+  (drops the tutor's last code block into the editor).
+- Run code with Ctrl+R (or the Run button), then "Send output to tutor" to
+  get it reviewed.
+- Mark a lesson complete and move to the next one (Ctrl+N) when ready.
 - The "Progress" tab shows overall/per-module completion, total time spent,
   and your current/longest day streak. A live session timer sits next to
   the lesson header.

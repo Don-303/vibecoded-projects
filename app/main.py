@@ -55,11 +55,21 @@ class TutorApp(App):
     #chat-log {
         padding: 1;
     }
+    #chat-panel {
+        width: 1fr;
+    }
+    #code-panel {
+        width: 1fr;
+        border-left: solid $accent;
+    }
+    #chat-actions, #code-actions {
+        height: auto;
+    }
     #code-editor {
         height: 1fr;
     }
     #code-output {
-        height: 12;
+        height: 10;
         border-top: solid $accent;
     }
     """
@@ -68,6 +78,8 @@ class TutorApp(App):
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+r", "run_code", "Run code"),
         ("ctrl+n", "next_lesson", "Next lesson"),
+        ("ctrl+b", "toggle_sidebar", "Sidebar"),
+        ("ctrl+e", "toggle_code_panel", "Code panel"),
     ]
 
     def __init__(self) -> None:
@@ -88,29 +100,31 @@ class TutorApp(App):
                     yield Static("", id="lesson-header")
                     yield Static("Session: 00:00:00", id="session-timer")
                 with TabbedContent():
-                    with TabPane("Tutor Chat", id="tab-chat"):
-                        with VerticalScroll(id="chat-scroll"):
-                            yield Markdown("", id="chat-log")
-                        yield Input(
-                            placeholder="Ask the tutor, or paste code/output for review...",
-                            id="chat-input",
-                        )
-                        with Horizontal(id="chat-actions"):
-                            yield Button("Quiz me", id="quiz-btn")
-                            yield Button("Practice exercise", id="practice-btn")
-                            yield Button("Worked example", id="example-btn")
-                            yield Button("Code → editor", id="to-editor-btn")
-                    with TabPane("Code Editor", id="tab-code"):
-                        yield TextArea(
-                            "",
-                            language="python",
-                            id="code-editor",
-                            theme="monokai",
-                        )
-                        with Horizontal():
-                            yield Button("Run", id="run-btn", variant="primary")
-                            yield Button("Send output to tutor", id="send-btn")
-                        yield RichLog(id="code-output", highlight=True, markup=True)
+                    with TabPane("Workspace", id="tab-work"):
+                        with Horizontal(id="workspace"):
+                            with Vertical(id="chat-panel"):
+                                with VerticalScroll(id="chat-scroll"):
+                                    yield Markdown("", id="chat-log")
+                                yield Input(
+                                    placeholder="Ask the tutor, or paste code/output for review...",
+                                    id="chat-input",
+                                )
+                                with Horizontal(id="chat-actions"):
+                                    yield Button("Quiz me", id="quiz-btn")
+                                    yield Button("Practice exercise", id="practice-btn")
+                                    yield Button("Worked example", id="example-btn")
+                                    yield Button("Code → editor", id="to-editor-btn")
+                            with Vertical(id="code-panel"):
+                                yield TextArea(
+                                    "",
+                                    language="python",
+                                    id="code-editor",
+                                    theme="monokai",
+                                )
+                                with Horizontal(id="code-actions"):
+                                    yield Button("Run", id="run-btn", variant="primary")
+                                    yield Button("Send output to tutor", id="send-btn")
+                                yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
                         with VerticalScroll():
                             yield Markdown("", id="progress-view")
@@ -149,6 +163,14 @@ class TutorApp(App):
         if nxt:
             self.load_lesson(nxt.id)
 
+    def action_toggle_sidebar(self) -> None:
+        sidebar = self.query_one("#sidebar")
+        sidebar.display = not sidebar.display
+
+    def action_toggle_code_panel(self) -> None:
+        panel = self.query_one("#code-panel")
+        panel.display = not panel.display
+
     def _flush_lesson_time(self, restart: bool = False) -> None:
         if self.lesson_start is not None and self.current_lesson_id:
             elapsed = time.monotonic() - self.lesson_start
@@ -173,7 +195,10 @@ class TutorApp(App):
         tree = self.query_one("#curriculum-tree", Tree)
         tree.root.expand()
         for module in curriculum.load_modules():
-            module_node = tree.root.add(module.title, expand=True)
+            # Collapse everything except the module being studied -- a fully
+            # expanded 10-module tree is mostly scrolling.
+            is_current = any(l.id == self.current_lesson_id for l in module.lessons)
+            module_node = tree.root.add(module.title, expand=is_current)
             for lesson in module.lessons:
                 mark = "✓ " if progress.is_complete(lesson.id) else "  "
                 module_node.add_leaf(f"{mark}{lesson.title}", data=lesson.id)
@@ -372,7 +397,8 @@ class TutorApp(App):
             blocks = re.findall(r"```(?:python|py)?\n(.*?)```", turn["content"], re.DOTALL)
             if blocks:
                 self.query_one("#code-editor", TextArea).text = blocks[-1].strip() + "\n"
-                self.query_one(TabbedContent).active = "tab-code"
+                self.query_one(TabbedContent).active = "tab-work"
+                self.query_one("#code-panel").display = True
                 self.notify("Code copied to editor — Ctrl+R to run.")
                 return
         self.notify("No code block found in the tutor's replies yet.", severity="warning")
@@ -405,7 +431,7 @@ class TutorApp(App):
             output_text = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
             output_text = output_text or "(no output)"
         message = f"Here is my code:\n```python\n{code}\n```\n\nOutput:\n```\n{output_text}\n```"
-        self.query_one(TabbedContent).active = "tab-chat"
+        self.query_one(TabbedContent).active = "tab-work"
         await self.send_to_tutor(message)
 
 
