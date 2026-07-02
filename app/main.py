@@ -304,6 +304,13 @@ class TutorApp(App):
         self.query_one("#code-output", RichLog).clear()
         if history:
             chat_log.update(self.chat_buffer)
+            # Prefill the model's prompt cache for this lesson in the
+            # background so the first real message starts replying in
+            # seconds. (Fresh lessons don't need this: auto-start below
+            # prefills as a side effect.)
+            self.run_worker(
+                self._prewarm_worker(lesson), group="prefix-warm", exclusive=True
+            )
         else:
             # Fresh lesson: have the tutor open it instead of waiting for the
             # student to say something. Only the tutor's intro is persisted,
@@ -347,6 +354,13 @@ class TutorApp(App):
             group="tutor-stream",
             exclusive=True,
         )
+
+    async def _prewarm_worker(self, lesson) -> None:
+        # Debounce: browsing quickly through lessons shouldn't queue a
+        # prefill per click (exclusive=True cancels this sleep on the next
+        # lesson switch, before any request is sent).
+        await asyncio.sleep(1.5)
+        await agent.prewarm(lesson, progress.get_history(lesson.id))
 
     async def stream_tutor_reply(self, lesson, history: list[dict], user_message: str) -> None:
         separator = "\n\n---\n\n" if self.chat_buffer else ""

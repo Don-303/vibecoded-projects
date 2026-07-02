@@ -106,12 +106,20 @@ def _build_reference_block(chunks: list[rag.Chunk]) -> str:
     return REFERENCE_TEMPLATE.format(example_title=chunks[0].title, blocks=blocks)
 
 
+# Total character budget for injected source material per lesson. Prefill is
+# the dominant first-message cost on CPU, and it scales with prompt length --
+# splitting a fixed budget across sources bounds the worst case (previously a
+# 3-source lesson injected up to 10.5k chars).
+SOURCE_BUDGET_CHARS = 7000
+
+
 def _build_source_lesson_block(lesson: Lesson) -> str:
     if not lesson.sources:
         return ""
+    per_source = min(3500, max(2200, SOURCE_BUDGET_CHARS // len(lesson.sources)))
     parts = []
     for src in lesson.sources:
-        text = rag.load_source_text(src.repo, src.file)
+        text = rag.load_source_text(src.repo, src.file, max_chars=per_source)
         if text:
             parts.append(f"=== {src.file} ({src.repo}) ===\n{text}")
     if not parts:
@@ -170,6 +178,27 @@ async def warm_up() -> None:
         await _client.chat(model=MODEL, messages=[], keep_alive=KEEP_ALIVE)
     except Exception:
         pass  # check_model_available() surfaces real problems to the user
+
+
+async def prewarm(lesson: Lesson, history: list[dict]) -> None:
+    """Prefill llama.cpp's prompt cache with this lesson's system prompt and
+    history (a 1-token request) so the user's next real message extends an
+    already-processed prefix instead of paying the full prefill (measured up
+    to ~80s on this CPU for source-heavy lessons)."""
+    extra_block = await _lesson_extra_block(lesson)
+    messages = [
+        {"role": "system", "content": system_prompt(lesson.module_title, lesson.title, extra_block)}
+    ]
+    messages.extend(history)
+    try:
+        await _client.chat(
+            model=MODEL,
+            messages=messages,
+            options={"num_ctx": NUM_CTX, "num_thread": NUM_THREAD, "num_predict": 1},
+            keep_alive=KEEP_ALIVE,
+        )
+    except Exception:
+        pass  # best-effort: the real message will just pay the prefill
 
 
 async def check_model_available() -> bool:
