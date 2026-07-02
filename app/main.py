@@ -31,6 +31,9 @@ DEFAULT_LESSON_ID = "py-core"
 
 
 class TutorApp(App):
+    TITLE = "Quant Tutor"
+    SUB_TITLE = "offline ML-for-finance tutor"
+
     CSS = """
     #sidebar {
         width: 42;
@@ -62,8 +65,15 @@ class TutorApp(App):
         width: 1fr;
         border-left: solid $accent;
     }
-    #chat-actions, #code-actions {
+    #chat-actions, #code-actions, #lesson-actions {
         height: auto;
+        padding: 0 1;
+    }
+    #chat-actions Button, #code-actions Button, #lesson-actions Button {
+        margin-right: 1;
+    }
+    #chat-input {
+        margin: 0 1;
     }
     #code-editor {
         height: 1fr;
@@ -113,11 +123,26 @@ class TutorApp(App):
                                     id="chat-input",
                                 )
                                 with Horizontal(id="chat-actions"):
-                                    yield Button("Quiz me", id="quiz-btn")
-                                    yield Button("Practice exercise", id="practice-btn")
-                                    yield Button("Worked example", id="example-btn")
-                                    yield Button("Code → editor", id="to-editor-btn")
-                                    yield Button("Stop", id="stop-btn", variant="error")
+                                    yield Button(
+                                        "Quiz me", id="quiz-btn", compact=True,
+                                        tooltip="One-question-at-a-time quiz on this lesson (counts as a review)",
+                                    )
+                                    yield Button(
+                                        "Practice", id="practice-btn", compact=True,
+                                        tooltip="Skeleton code with TODOs for you to fill in",
+                                    )
+                                    yield Button(
+                                        "Example", id="example-btn", compact=True,
+                                        tooltip="Complete runnable worked example",
+                                    )
+                                    yield Button(
+                                        "Code → editor", id="to-editor-btn", compact=True,
+                                        tooltip="Copy the tutor's last code block into the editor",
+                                    )
+                                    yield Button(
+                                        "Stop", id="stop-btn", variant="error", compact=True,
+                                        tooltip="Cancel the tutor's current reply",
+                                    )
                             with Vertical(id="code-panel"):
                                 yield TextArea(
                                     "",
@@ -126,16 +151,31 @@ class TutorApp(App):
                                     theme="monokai",
                                 )
                                 with Horizontal(id="code-actions"):
-                                    yield Button("Run", id="run-btn", variant="primary")
-                                    yield Button("Send output to tutor", id="send-btn")
+                                    yield Button(
+                                        "Run", id="run-btn", variant="primary", compact=True,
+                                        tooltip="Run the code (Ctrl+R); plots are saved to data/plots/",
+                                    )
+                                    yield Button(
+                                        "Send output to tutor", id="send-btn", compact=True,
+                                        tooltip="Send your code and its output to the tutor for review",
+                                    )
                                 yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
                         with VerticalScroll():
                             yield Markdown("", id="progress-view")
-                with Horizontal():
-                    yield Button("Mark lesson complete", id="complete-btn", variant="success")
-                    yield Button("Next lesson →", id="next-btn")
-                    yield Button("Reset lesson chat", id="reset-btn", variant="warning")
+                with Horizontal(id="lesson-actions"):
+                    yield Button(
+                        "Mark complete", id="complete-btn", variant="success", compact=True,
+                        tooltip="Mark this lesson done (comes due for review in a week)",
+                    )
+                    yield Button(
+                        "Next lesson →", id="next-btn", compact=True,
+                        tooltip="Move to the next lesson (Ctrl+N)",
+                    )
+                    yield Button(
+                        "Reset chat", id="reset-btn", variant="warning", compact=True,
+                        tooltip="Clear this lesson's conversation and start over",
+                    )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -144,6 +184,7 @@ class TutorApp(App):
         self.refresh_progress_view()
         self.run_worker(self.check_model(), group="model-check")
         self.set_interval(1.0, self.update_session_timer)
+        self.query_one("#chat-input", Input).focus()
 
     def update_session_timer(self) -> None:
         elapsed = int(time.monotonic() - self.session_start)
@@ -238,9 +279,14 @@ class TutorApp(App):
         self.lesson_start = time.monotonic()
         self.query_one("#code-editor", TextArea).text = progress.get_code(lesson_id)
         self._code_loaded_for = lesson_id
-        status = "done" if progress.is_complete(lesson_id) else "in progress"
+        if progress.is_review_due(lesson_id):
+            status = "↻ review due"
+        elif progress.is_complete(lesson_id):
+            status = "✓ done"
+        else:
+            status = "○ in progress"
         header = self.query_one("#lesson-header", Static)
-        header.update(f"[b]{lesson.module_title}[/b] › {lesson.title}  ({status})")
+        header.update(f"[b]{lesson.module_title}[/b] › {lesson.title}  [dim]{status}[/dim]")
 
         history = progress.get_history(lesson_id)
         self.chat_buffer = self._render_history(history)
@@ -297,6 +343,9 @@ class TutorApp(App):
         self.chat_buffer += f"{separator}**Tutor**:\n\n"
         reply_so_far = ""
         chat_log = self.query_one("#chat-log", Markdown)
+        # First token can take a while on CPU -- show that something is happening.
+        await chat_log.update(self.chat_buffer + "_Thinking..._")
+        self._scroll_chat_to_end()
         # Re-parsing the whole markdown document per token is O(n^2) over the
         # conversation and competes with Ollama for CPU; render at most ~4x/s.
         last_render = 0.0
@@ -306,7 +355,7 @@ class TutorApp(App):
                 now = time.monotonic()
                 if now - last_render >= 0.25:
                     last_render = now
-                    await chat_log.update(self.chat_buffer + reply_so_far)
+                    await chat_log.update(self.chat_buffer + reply_so_far + " ▌")
                     self._scroll_chat_to_end()
         except Exception as exc:
             reply_so_far = f"_Error talking to local model: {exc}_"
