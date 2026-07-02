@@ -89,6 +89,9 @@ class TutorApp(App):
         self.session_start = time.monotonic()
         self.lesson_start: float | None = None
         self.last_run_result: sandbox.RunResult | None = None
+        # Which lesson's code currently occupies the editor -- None until the
+        # first load so app start can't clobber saved code with an empty buffer.
+        self._code_loaded_for: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -114,6 +117,7 @@ class TutorApp(App):
                                     yield Button("Practice exercise", id="practice-btn")
                                     yield Button("Worked example", id="example-btn")
                                     yield Button("Code → editor", id="to-editor-btn")
+                                    yield Button("Stop", id="stop-btn", variant="error")
                             with Vertical(id="code-panel"):
                                 yield TextArea(
                                     "",
@@ -146,14 +150,20 @@ class TutorApp(App):
         h, rem = divmod(elapsed, 3600)
         m, s = divmod(rem, 60)
         self.query_one("#session-timer", Static).update(f"Session: {h:02d}:{m:02d}:{s:02d}")
-        # Checkpoint tracked time every minute so closing the terminal
-        # abruptly (instead of ctrl+q) loses at most a minute.
+        # Checkpoint tracked time and editor code every minute so closing the
+        # terminal abruptly (instead of ctrl+q) loses at most a minute.
         if elapsed and elapsed % 60 == 0:
             self._flush_lesson_time(restart=True)
+            self._save_editor_code()
 
     async def action_quit(self) -> None:
         self._flush_lesson_time()
+        self._save_editor_code()
         self.exit()
+
+    def _save_editor_code(self) -> None:
+        if self._code_loaded_for is not None:
+            progress.save_code(self._code_loaded_for, self.query_one("#code-editor", TextArea).text)
 
     def action_run_code(self) -> None:
         self.run_code()
@@ -218,8 +228,11 @@ class TutorApp(App):
         if lesson is None:
             return
         self._flush_lesson_time()
+        self._save_editor_code()
         self.current_lesson_id = lesson_id
         self.lesson_start = time.monotonic()
+        self.query_one("#code-editor", TextArea).text = progress.get_code(lesson_id)
+        self._code_loaded_for = lesson_id
         status = "done" if progress.is_complete(lesson_id) else "in progress"
         header = self.query_one("#lesson-header", Static)
         header.update(f"[b]{lesson.module_title}[/b] › {lesson.title}  ({status})")
@@ -387,6 +400,17 @@ class TutorApp(App):
             )
         elif event.button.id == "to-editor-btn":
             self.copy_last_code_to_editor()
+        elif event.button.id == "stop-btn":
+            self.action_stop_generation()
+
+    def action_stop_generation(self) -> None:
+        """Cancel an in-flight tutor reply. Nothing is persisted for the
+        cancelled turn, so the conversation stays consistent on reload."""
+        cancelled = self.workers.cancel_group(self, "tutor-stream")
+        if cancelled:
+            self.chat_buffer += "_[generation stopped]_"
+            self.query_one("#chat-log", Markdown).update(self.chat_buffer)
+            self._scroll_chat_to_end()
 
     def copy_last_code_to_editor(self) -> None:
         """Pull the most recent ```python block from the tutor's replies into

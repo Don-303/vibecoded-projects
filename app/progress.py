@@ -17,6 +17,7 @@ def _load() -> dict:
     state.setdefault("history", {})
     state.setdefault("time_spent", {})
     state.setdefault("activity_dates", [])
+    state.setdefault("code", {})
     return state
 
 
@@ -55,6 +56,19 @@ def append_history(lesson_id: str, role: str, content: str) -> None:
 def clear_history(lesson_id: str) -> None:
     state = _load()
     state["history"].pop(lesson_id, None)
+    _save(state)
+
+
+def get_code(lesson_id: str) -> str:
+    return _load()["code"].get(lesson_id, "")
+
+
+def save_code(lesson_id: str, text: str) -> None:
+    state = _load()
+    if text.strip():
+        state["code"][lesson_id] = text
+    else:
+        state["code"].pop(lesson_id, None)
     _save(state)
 
 
