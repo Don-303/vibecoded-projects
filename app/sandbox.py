@@ -7,7 +7,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-TIMEOUT_SECONDS = 20
+# Generous enough for the small PyTorch/statsmodels exercises in the
+# MoQuant/MSc lessons, which can exceed 20s on this CPU-only machine.
+TIMEOUT_SECONDS = 60
 PLOTS_DIR = Path(__file__).resolve().parent.parent / "data" / "plots"
 
 # Wraps the student's code so matplotlib works in a windowless subprocess:

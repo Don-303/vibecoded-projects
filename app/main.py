@@ -144,7 +144,9 @@ class TutorApp(App):
                                         tooltip="Cancel the tutor's current reply",
                                     )
                             with Vertical(id="code-panel"):
-                                yield TextArea(
+                                # code_editor preset: Tab indents (instead of
+                                # moving focus), line numbers, no soft wrap.
+                                yield TextArea.code_editor(
                                     "",
                                     language="python",
                                     id="code-editor",
@@ -158,6 +160,14 @@ class TutorApp(App):
                                     yield Button(
                                         "Send output to tutor", id="send-btn", compact=True,
                                         tooltip="Send your code and its output to the tutor for review",
+                                    )
+                                    yield Button(
+                                        "Copy", id="copy-btn", compact=True,
+                                        tooltip="Copy the editor contents to the clipboard",
+                                    )
+                                    yield Button(
+                                        "Clear", id="clear-btn", compact=True,
+                                        tooltip="Clear the editor and output pane",
                                     )
                                 yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
@@ -466,6 +476,13 @@ class TutorApp(App):
             self.copy_last_code_to_editor()
         elif event.button.id == "stop-btn":
             self.action_stop_generation()
+        elif event.button.id == "copy-btn":
+            self.copy_to_clipboard(self.query_one("#code-editor", TextArea).text)
+            self.notify("Editor contents copied to clipboard.")
+        elif event.button.id == "clear-btn":
+            self.query_one("#code-editor", TextArea).text = ""
+            self.query_one("#code-output", RichLog).clear()
+            self.last_run_result = None
 
     def action_stop_generation(self) -> None:
         """Cancel an in-flight tutor reply. Nothing is persisted for the
@@ -484,9 +501,11 @@ class TutorApp(App):
                 continue
             blocks = re.findall(r"```(?:python|py)?\n(.*?)```", turn["content"], re.DOTALL)
             if blocks:
-                self.query_one("#code-editor", TextArea).text = blocks[-1].strip() + "\n"
+                editor = self.query_one("#code-editor", TextArea)
+                editor.text = blocks[-1].strip() + "\n"
                 self.query_one(TabbedContent).active = "tab-work"
                 self.query_one("#code-panel").display = True
+                editor.focus()
                 self.notify("Code copied to editor — Ctrl+R to run.")
                 return
         self.notify("No code block found in the tutor's replies yet.", severity="warning")
@@ -497,10 +516,15 @@ class TutorApp(App):
     async def _run_code_worker(self) -> None:
         code = self.query_one("#code-editor", TextArea).text
         output_log = self.query_one("#code-output", RichLog)
+        run_btn = self.query_one("#run-btn", Button)
         output_log.clear()
         output_log.write("[dim]running...[/dim]")
-        # Subprocess call blocks up to sandbox.TIMEOUT_SECONDS; keep the UI alive.
-        result = await asyncio.to_thread(sandbox.run_code, code)
+        run_btn.disabled = True
+        try:
+            # Subprocess call blocks up to sandbox.TIMEOUT_SECONDS; keep the UI alive.
+            result = await asyncio.to_thread(sandbox.run_code, code)
+        finally:
+            run_btn.disabled = False
         self.last_run_result = result
         output_log.clear()
         if result.stdout:
