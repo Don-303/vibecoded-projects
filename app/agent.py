@@ -26,7 +26,7 @@ NUM_CTX = 8192
 # - NUM_THREAD: llama.cpp's default thread count under-uses this CPU (we
 #   observed ~2 cores active during inference); leave 2 threads free for the
 #   OS/UI rather than requesting all 12.
-KEEP_ALIVE = "30m"
+KEEP_ALIVE = "24h"
 NUM_THREAD = 10
 
 # Bound reply length: the tutor is instructed to be concise, and on CPU each

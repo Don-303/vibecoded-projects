@@ -7,3 +7,4 @@ statsmodels
 matplotlib
 rich
 pyyaml
+pytest

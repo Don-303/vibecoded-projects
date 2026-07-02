@@ -15,7 +15,7 @@ from ollama import AsyncClient, Client
 EMBED_MODEL = "nomic-embed-text"
 # Avoid a cold reload between chat turns on this CPU-only machine (see
 # app/agent.py's KEEP_ALIVE for the same reasoning).
-EMBED_KEEP_ALIVE = "30m"
+EMBED_KEEP_ALIVE = "24h"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CORPUS_DIR = PROJECT_ROOT / "corpus"
@@ -33,6 +33,17 @@ SOURCES = [
     ("quantecon-lecture-python-advanced", "https://github.com/QuantEcon/lecture-python-advanced.myst.git", "lectures", "*.md"),
     ("quantecon-lecture-datascience", "https://github.com/QuantEcon/lecture-datascience.myst.git", "lectures", "*.md"),
     ("quantecon-continuous-time-mcs", "https://github.com/QuantEcon/continuous_time_mcs.git", "lectures", "*.md"),
+    # MoQuant applied-project repos (small, single-purpose quant scripts).
+    ("moquant-IntroToQuantFinance", "https://github.com/MoQuant/IntroToQuantFinance.git", ".", "*.ipynb"),
+    ("moquant-IntroToOptionPricing", "https://github.com/MoQuant/IntroToOptionPricing.git", ".", "*.ipynb"),
+    ("moquant-PyTorchVolForecaster", "https://github.com/MoQuant/PyTorchVolForecaster.git", ".", "*.ipynb"),
+    ("moquant-PortfolioOptimizationTutorial", "https://github.com/MoQuant/PortfolioOptimizationTutorial.git", ".", "*.ipynb"),
+    ("moquant-GarchModel", "https://github.com/MoQuant/GarchModel.git", ".", "*.py"),
+    ("moquant-ValueAtRiskSimulation", "https://github.com/MoQuant/ValueAtRiskSimulation.git", ".", "*.py"),
+    ("moquant-PrincipalComponentAnalysis", "https://github.com/MoQuant/PrincipalComponentAnalysis.git", ".", "*.py"),
+    ("moquant-Cointegration", "https://github.com/MoQuant/Cointegration.git", ".", "*.py"),
+    ("moquant-PyTorchForecaster", "https://github.com/MoQuant/PyTorchForecaster.git", ".", "*.py"),
+    ("moquant-PutCallParity", "https://github.com/MoQuant/PutCallParity.git", ".", "*.py"),
 ]
 
 FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)

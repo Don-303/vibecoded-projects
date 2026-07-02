@@ -18,6 +18,8 @@ def _load() -> dict:
     state.setdefault("time_spent", {})
     state.setdefault("activity_dates", [])
     state.setdefault("code", {})
+    state.setdefault("completed_at", {})
+    state.setdefault("reviewed_at", {})
     return state
 
 
@@ -30,11 +32,38 @@ def is_complete(lesson_id: str) -> bool:
     return lesson_id in _load()["completed"]
 
 
+REVIEW_INTERVAL_DAYS = 7
+
+
 def mark_complete(lesson_id: str) -> None:
     state = _load()
     if lesson_id not in state["completed"]:
         state["completed"].append(lesson_id)
+    state["completed_at"][lesson_id] = date.today().isoformat()
     _save(state)
+
+
+def mark_reviewed(lesson_id: str) -> None:
+    state = _load()
+    state["reviewed_at"][lesson_id] = date.today().isoformat()
+    _save(state)
+
+
+def is_review_due(lesson_id: str) -> bool:
+    """A completed lesson comes due for review REVIEW_INTERVAL_DAYS after it
+    was completed or last reviewed, whichever is later. Lessons completed
+    before dates were recorded never come due (no way to know how stale)."""
+    state = _load()
+    if lesson_id not in state["completed"]:
+        return False
+    stamps = [
+        state["completed_at"].get(lesson_id),
+        state["reviewed_at"].get(lesson_id),
+    ]
+    stamps = [date.fromisoformat(s) for s in stamps if s]
+    if not stamps:
+        return False
+    return (date.today() - max(stamps)).days >= REVIEW_INTERVAL_DAYS
 
 
 def mark_incomplete(lesson_id: str) -> None:

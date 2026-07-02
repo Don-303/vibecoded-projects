@@ -210,7 +210,12 @@ class TutorApp(App):
             is_current = any(l.id == self.current_lesson_id for l in module.lessons)
             module_node = tree.root.add(module.title, expand=is_current)
             for lesson in module.lessons:
-                mark = "✓ " if progress.is_complete(lesson.id) else "  "
+                if progress.is_review_due(lesson.id):
+                    mark = "↻ "
+                elif progress.is_complete(lesson.id):
+                    mark = "✓ "
+                else:
+                    mark = "  "
                 module_node.add_leaf(f"{mark}{lesson.title}", data=lesson.id)
 
     def refresh_tree(self) -> None:
@@ -352,6 +357,13 @@ class TutorApp(App):
             f"- Longest streak: {progress.longest_streak()} day(s)",
         ]
 
+        due = [l for m in modules for l in m.lessons if progress.is_review_due(l.id)]
+        if due:
+            lines.append("")
+            lines.append(f"## Review due ({len(due)}) — use \"Quiz me\" to refresh")
+            for l in due:
+                lines.append(f"- ↻ {l.module_title}: {l.title}")
+
         remaining = [l for m in modules for l in m.lessons if not progress.is_complete(l.id)]
         if remaining:
             lines.append("")
@@ -382,6 +394,9 @@ class TutorApp(App):
             self.load_lesson(self.current_lesson_id)
             self.notify("Lesson conversation cleared.")
         elif event.button.id == "quiz-btn":
+            if progress.is_complete(self.current_lesson_id):
+                progress.mark_reviewed(self.current_lesson_id)
+                self.refresh_tree()
             await self.send_to_tutor(
                 "Quiz me on what we've covered so far in this lesson: ask me "
                 "one short question at a time and check my answer before the next."

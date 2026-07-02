@@ -40,14 +40,25 @@ starting the app.
   TODOs), "Worked example" (complete runnable code), and "Code → editor"
   (drops the tutor's last code block into the editor).
 - Run code with Ctrl+R (or the Run button), then "Send output to tutor" to
-  get it reviewed.
+  get it reviewed. Matplotlib figures are saved to `data/plots/` (the path
+  is printed in the output pane). A Stop button cancels a slow reply.
+- Your editor code is saved per lesson and restored when you come back.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
 - The "Progress" tab shows overall/per-module completion, total time spent,
   and your current/longest day streak. A live session timer sits next to
   the lesson header.
+- Spaced repetition: a week after you complete a lesson it comes due for
+  review (↻ in the tree and a "Review due" list in Progress); hitting
+  "Quiz me" on it counts as a review and resets the clock.
 
-Progress, time spent per lesson, activity streaks, and per-lesson chat
+Progress, time spent per lesson, activity streaks, saved code, and chat
 history are stored locally in `data/progress.json` (not committed to git).
+
+## Tests
+
+```bash
+.venv/bin/pytest
+```
 
 ## Grounding the tutor in real lecture material
 
@@ -78,6 +89,13 @@ model-memory and toward real reference material:
   `lecture-python-programming`, `lecture-python.myst`,
   `lecture-python-advanced.myst`, `lecture-datascience.myst`,
   `continuous_time_mcs`)
+- Ten [MoQuant](https://github.com/MoQuant) applied-project repos (options
+  pricing, put-call parity, GARCH, VaR simulation, PCA, cointegration/stat-arb,
+  PyTorch price & volatility forecasters, portfolio analysis) — these back
+  the "Applied Projects (MoQuant)" curriculum module
+- Your MSc CF969 (Machine Learning in Finance) lab/case-study notebooks,
+  copied from the local Google Drive mirror by
+  `scripts/add_local_corpus.py` (personal material, never committed)
 
 ### One-time setup (needs internet)
 
