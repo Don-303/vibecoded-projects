@@ -4,6 +4,7 @@ pandas
 numpy
 scikit-learn
 statsmodels
+arch
 matplotlib
 rich
 pyyaml

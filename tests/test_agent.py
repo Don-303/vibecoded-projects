@@ -20,6 +20,7 @@ def test_shipped_skills_load():
         "concept-explainer",
         "exam-blueprint",
         "flashcard-deck",
+        "quant-project-mentor",
     } <= names
     coach = skills.load("python-playground-coach")
     assert coach is not None
@@ -39,6 +40,13 @@ def test_python_foundations_gets_playground_skill():
 def test_other_modules_do_not_get_playground_skill():
     prompt = agent.system_prompt(_lesson("econometrics", "Time Series & Econometrics"))
     assert "python-playground-coach" not in prompt
+
+
+def test_project_modules_get_project_mentor_skill():
+    for module_id in ("moquant-projects", "capstone"):
+        prompt = agent.system_prompt(_lesson(module_id, "Applied Projects"))
+        assert 'Teaching skill "quant-project-mentor" is active' in prompt
+        assert "Stage" in prompt
 
 
 def test_mode_skill_is_injected():

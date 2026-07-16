@@ -130,8 +130,13 @@ every reply, adapted to the current lesson's subject matter:
 # Skills applied automatically to every lesson of a module. Keyed on module
 # id so the system prompt stays deterministic per lesson (prefix-cache
 # requirement). python-foundations: predict-then-run playground loops beat
-# lecturing for absolute basics.
-MODULE_SKILLS = {"python-foundations": "python-playground-coach"}
+# lecturing for absolute basics. The two applied-project modules get the
+# staged project walkthrough that teaches the quant package stack.
+MODULE_SKILLS = {
+    "python-foundations": "python-playground-coach",
+    "moquant-projects": "quant-project-mentor",
+    "capstone": "quant-project-mentor",
+}
 
 # Skills the student can switch on per lesson as a "tutor style" (persisted
 # in progress.json and appended to the system prompt).

@@ -65,6 +65,18 @@ RECAP_MESSAGE = (
     "at most 8 short bullet points (include formulas or code idioms where "
     "they matter), then say in one line what's still left to cover."
 )
+PROJECT_MESSAGE = (
+    "Suggest 3 quant finance mini-projects that build on this lesson, sized "
+    "small enough to finish in a few sessions: for each, two lines -- what "
+    "I'd build, and which packages/APIs it would teach me (be specific, "
+    "e.g. statsmodels.tsa, sklearn.model_selection, scipy.optimize, arch; "
+    "only packages that run offline: numpy, pandas, matplotlib, scipy, "
+    "statsmodels, scikit-learn, arch -- synthetic seeded data, no web "
+    "APIs). Then ask me which one to start, and walk me through it in "
+    "stages: data, exploration, model, evaluation, report -- one stage at "
+    "a time, skeleton code with TODOs, and review my output before we "
+    "move on."
+)
 
 
 class ModelPicker(ModalScreen[str]):
@@ -242,6 +254,11 @@ class TutorApp(App):
                                     yield Button(
                                         "Recap", id="recap-btn", compact=True,
                                         tooltip="Key takeaways so far + what's left in this lesson",
+                                    )
+                                    yield Button(
+                                        "Project", id="project-btn", compact=True,
+                                        tooltip="Suggest quant mini-projects for this lesson and "
+                                        "walk through one in stages, teaching the packages",
                                     )
                                     yield Button(
                                         "Code → editor", id="to-editor-btn", compact=True,
@@ -639,6 +656,8 @@ class TutorApp(App):
             await self.send_to_tutor(FLASHCARDS_MESSAGE)
         elif event.button.id == "recap-btn":
             await self.send_to_tutor(RECAP_MESSAGE)
+        elif event.button.id == "project-btn":
+            await self.send_to_tutor(PROJECT_MESSAGE)
         elif event.button.id == "practice-btn":
             await self.send_to_tutor(
                 "Give me a practice exercise for this lesson: skeleton Python "

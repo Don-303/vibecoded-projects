@@ -91,6 +91,13 @@ these came from (MIT-0 licensed):
 - **python-playground-coach** — applied automatically to every
   Python-foundations lesson (tiny goals, predict-what-it-prints, small
   challenges).
+- **quant-project-mentor** (written for this app) — applied automatically
+  to the MoQuant and capstone project modules, and behind the "Project"
+  button everywhere: suggests three projects sized to your level, then
+  walks the chosen one through five stages (data → exploration → model →
+  evaluation → report), introducing each package of the quant stack
+  (numpy, pandas, matplotlib, scipy, statsmodels, scikit-learn, arch) as
+  the project needs it.
 - **socratic-tutor** / **concept-explainer** — the header's tutor-style
   selector.
 - **exam-blueprint** / **flashcard-deck** — power the "Quiz me" and

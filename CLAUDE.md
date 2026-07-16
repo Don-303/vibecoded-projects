@@ -62,7 +62,10 @@ to the local instance regardless of that env var.
 - `app/skills.py` + `skills/` — teaching-skill playbooks in the
   Agent-Skills format (SKILL.md, from DeepTutor's EduHub registry, MIT-0).
   `agent.MODULE_SKILLS` maps modules to always-on skills
-  (python-foundations → python-playground-coach); `agent.MODE_SKILLS` are
+  (python-foundations → python-playground-coach; moquant-projects and
+  capstone → quant-project-mentor, a staged project walkthrough written
+  for this app that teaches the installed package stack — see the
+  "Project" button's PROJECT_MESSAGE too); `agent.MODE_SKILLS` are
   the user-selectable tutor styles (socratic-tutor, concept-explainer),
   persisted per lesson in progress.json (`teaching_skill`). Skill bodies
   are appended to the system prompt via `SKILL_TEMPLATE`; skills.load() is
