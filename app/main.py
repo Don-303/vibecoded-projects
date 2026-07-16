@@ -29,7 +29,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from app import agent, curriculum, progress, sandbox
+from app import agent, curriculum, progress, sandbox, theming
 
 DEFAULT_LESSON_ID = "py-core"
 
@@ -317,9 +317,25 @@ class TutorApp(App):
         self.build_tree()
         self.refresh_progress_view()
         self.set_interval(1.0, self.update_session_timer)
+        # Follow the desktop theme, and keep following it live. Only a
+        # *change* in detection re-applies, so picking a theme manually
+        # (command palette) sticks until the system theme actually changes.
+        self._system_theme = theming.system_theme(set(self.available_themes))
+        self.theme = self._system_theme
+        self.set_interval(3.0, self._sync_theme)
         # Lesson loading waits for the model choice so the auto-started
         # intro (and the warm-up) run against the chosen model.
         self.run_worker(self._pick_model_and_start(), group="model-check")
+
+    async def _sync_theme(self) -> None:
+        # Off-thread: the gsettings fallback shells out, which must not
+        # stall the UI loop (or token streaming) every tick.
+        detected = await asyncio.to_thread(
+            theming.system_theme, set(self.available_themes)
+        )
+        if detected != self._system_theme:
+            self._system_theme = detected
+            self.theme = detected
 
     async def _pick_model_and_start(self) -> None:
         installed = await agent.installed_models()

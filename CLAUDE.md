@@ -81,6 +81,10 @@ to the local instance regardless of that env var.
   Needs internet only for this step.
 - `app/sandbox.py` — runs student code in a subprocess (using this venv's
   interpreter) with a timeout, capturing stdout/stderr.
+- `app/theming.py` — maps the desktop theme to a Textual theme (Omarchy
+  theme.name → same-named/renamed builtin, light.mode marker or gsettings
+  for light/dark fallback). Polled every 3s off-thread from `main.py`;
+  only a detection *change* re-applies, so manual palette picks stick.
 - `app/progress.py` — JSON-backed persistence (`data/progress.json`,
   gitignored) for lesson completion + per-lesson chat history.
 - `app/main.py` — the Textual TUI: sidebar lesson tree, chat tab, code

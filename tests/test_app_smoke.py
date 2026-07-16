@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from textual.widgets import Button, Select, TextArea, Tree
 
-from app import agent, progress
+from app import agent, progress, theming
 from app.main import ModelPicker, TutorApp
 
 CANNED = 'Intro!\n```python\nprint(1 + 1)\n```\nReady?'
@@ -25,6 +25,10 @@ def _mocked_model(stream=_fake_stream):
     )
     stack.enter_context(patch.object(agent, "warm_up", AsyncMock()))
     stack.enter_context(patch.object(agent, "prewarm", AsyncMock()))
+    # Theme detection reads the host desktop's config; pin it for tests.
+    stack.enter_context(
+        patch.object(theming, "system_theme", lambda builtin: "textual-dark")
+    )
     return stack
 
 
@@ -77,6 +81,9 @@ def test_boot_picker_autostart_and_layout():
 
                 # tutor-style selector exists and defaults to standard
                 assert app.query_one("#style-select", Select).value == "standard"
+
+                # theme followed the (pinned) system detection
+                assert app.theme == "textual-dark"
 
     asyncio.run(scenario())
 

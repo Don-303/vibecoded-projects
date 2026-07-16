@@ -51,6 +51,11 @@ starting the app.
   lesson), "Recap" (key takeaways so far + what's left — useful before
   marking a lesson complete), and "Code → editor" (drops the tutor's last
   code block into the editor).
+- The app follows your desktop theme, live: if your system theme has a
+  Textual counterpart (nord, gruvbox, tokyo-night, catppuccin, …) it's
+  used directly, otherwise the app just matches light/dark. Switching the
+  system theme restyles the tutor within a few seconds; a theme picked
+  manually in the command palette sticks until the system theme changes.
 - Each reply ends with a dim speed line (time to first token · tok/s), so
   you can tell a cold prompt from a warm one. Very long lesson chats are
   trimmed automatically (oldest turns first) so the tutor never loses the
