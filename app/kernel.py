@@ -73,8 +73,14 @@ def ensure() -> None:
         _km, _kc = km, kc
 
 
-def run_code(code: str) -> RunResult:
-    """Execute code in the persistent kernel. Blocking -- call via a thread."""
+def run_code(code: str, on_output=None) -> RunResult:
+    """Execute code in the persistent kernel. Blocking -- call via a thread.
+
+    `on_output(name, text)` (name is "stdout" or "stderr"), if given, is
+    called from this thread as output arrives, so long runs (training
+    loops, simulations) can be shown live instead of all at the end. The
+    full output is still returned in the RunResult.
+    """
     try:
         ensure()
     except Exception as exc:
@@ -85,14 +91,19 @@ def run_code(code: str) -> RunResult:
             returncode=1,
         )
     with _lock:
-        result = _execute(code, TIMEOUT_SECONDS)
+        result = _execute(code, TIMEOUT_SECONDS, on_output)
         if not result.timed_out:
-            plots = _execute(_PLOT_EPILOGUE.format(plots_dir=str(PLOTS_DIR)), 15)
+            plots = _execute(_PLOT_EPILOGUE.format(plots_dir=str(PLOTS_DIR)), 15, on_output)
             result.stdout += plots.stdout
         return result
 
 
-def _execute(code: str, timeout: float) -> RunResult:
+def _execute(code: str, timeout: float, on_output=None) -> RunResult:
+    def emit(name: str, text: str) -> None:
+        if on_output is not None:
+            with contextlib.suppress(Exception):
+                on_output(name, text)
+
     msg_id = _kc.execute(code)
     stdout_parts: list[str] = []
     stderr_parts: list[str] = []
@@ -110,7 +121,9 @@ def _execute(code: str, timeout: float) -> RunResult:
             interrupted = timed_out = True
             with contextlib.suppress(Exception):
                 _km.interrupt_kernel()
-            stderr_parts.append(f"\n[interrupted after {timeout:.0f}s]")
+            note = f"\n[interrupted after {timeout:.0f}s]"
+            stderr_parts.append(note)
+            emit("stderr", note)
             deadline = now + 10  # grace period to reach idle
         try:
             msg = _kc.get_iopub_msg(timeout=1.0)
@@ -121,15 +134,19 @@ def _execute(code: str, timeout: float) -> RunResult:
         mtype = msg["msg_type"]
         content = msg["content"]
         if mtype == "stream":
-            target = stdout_parts if content["name"] == "stdout" else stderr_parts
-            target.append(content["text"])
+            name = "stdout" if content["name"] == "stdout" else "stderr"
+            (stdout_parts if name == "stdout" else stderr_parts).append(content["text"])
+            emit(name, content["text"])
         elif mtype in ("execute_result", "display_data"):
             text = content.get("data", {}).get("text/plain")
             if text:
                 stdout_parts.append(text + "\n")
+                emit("stdout", text + "\n")
         elif mtype == "error":
             ok = False
-            stderr_parts.append(_ANSI_RE.sub("", "\n".join(content.get("traceback", []))))
+            traceback = _ANSI_RE.sub("", "\n".join(content.get("traceback", [])))
+            stderr_parts.append(traceback)
+            emit("stderr", traceback)
         elif mtype == "status" and content.get("execution_state") == "idle":
             break
     return RunResult(

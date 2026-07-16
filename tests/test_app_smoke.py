@@ -257,3 +257,38 @@ def test_reset_requires_confirmation():
                 assert not isinstance(app.screen, ConfirmScreen)
 
     asyncio.run(scenario())
+
+
+def test_resumes_last_lesson_on_launch():
+    async def scenario():
+        with _mocked_model():
+            progress.save_last_lesson("py-numpy")
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                assert app.current_lesson_id == "py-numpy"
+
+    asyncio.run(scenario())
+
+
+def test_ctrl_d_jumps_to_review_due():
+    async def scenario():
+        with _mocked_model():
+            from datetime import date, timedelta
+
+            progress.mark_complete("py-numpy")
+            state = progress._load()
+            state["completed_at"]["py-numpy"] = (
+                date.today() - timedelta(days=10)
+            ).isoformat()
+            progress._save(state)
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                app.action_next_review()
+                await pilot.pause(0.3)
+                assert app.current_lesson_id == "py-numpy"
+
+    asyncio.run(scenario())

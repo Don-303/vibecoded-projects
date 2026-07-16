@@ -70,12 +70,16 @@ starting the app.
   Run button) and variables survive between runs — build up your analysis
   incrementally like a notebook. Selecting lines runs just the selection;
   a bare expression echoes its value like the REPL; errors come back as
-  real tracebacks. "Restart" wipes the kernel's variables. Then "Send
-  output to tutor" to get the run reviewed. Matplotlib figures are saved
-  to `data/plots/` (the "Plots" button opens the folder in your image
-  viewer). A Stop button cancels a slow tutor reply.
+  real tracebacks. Output streams into the pane live as it's printed
+  (training loops show progress per epoch), ending with a run-time line.
+  "Restart" wipes the kernel's variables. Then "Send output to tutor" to
+  get the run reviewed. Matplotlib figures are saved to `data/plots/`
+  (the "Plots" button opens the folder in your image viewer). A Stop
+  button cancels a slow tutor reply.
 - Your editor code is saved per lesson and restored when you come back.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
+  The app reopens on whatever lesson you had open last session, and
+  Ctrl+D jumps straight to the next lesson due for review.
 - The "Progress" tab shows overall/per-module completion, total time spent,
   and your current/longest day streak. A live session timer sits next to
   the lesson header.

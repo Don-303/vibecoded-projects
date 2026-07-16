@@ -46,6 +46,7 @@ HELP_TEXT = f"""\
 | Ctrl+B | Show/hide the curriculum sidebar |
 | Ctrl+E | Show/hide the code editor panel |
 | Ctrl+T | Switch model (Escape cancels) |
+| Ctrl+D | Jump to the next lesson due for review |
 | F1 | This help |
 | Ctrl+Q | Quit |
 
@@ -322,12 +323,17 @@ class TutorApp(App):
         ("ctrl+b", "toggle_sidebar", "Sidebar"),
         ("ctrl+e", "toggle_code_panel", "Code panel"),
         ("ctrl+t", "switch_model", "Model"),
+        ("ctrl+d", "next_review", "Review"),
         ("f1", "show_help", "Help"),
     ]
 
     def __init__(self) -> None:
         super().__init__()
-        self.current_lesson_id = DEFAULT_LESSON_ID
+        # Resume where the student left off last session.
+        saved = progress.get_last_lesson()
+        self.current_lesson_id = (
+            saved if saved and curriculum.find_lesson(saved) else DEFAULT_LESSON_ID
+        )
         self.chat_buffer = ""
         self.session_start = time.monotonic()
         self.lesson_start: float | None = None
@@ -538,6 +544,19 @@ class TutorApp(App):
     def action_show_help(self) -> None:
         self.push_screen(HelpScreen())
 
+    def action_next_review(self) -> None:
+        """Jump to the first lesson that's due for spaced review."""
+        due = [
+            lesson for lesson in curriculum.all_lessons() if progress.is_review_due(lesson.id)
+        ]
+        if not due:
+            self.notify("No reviews due — nothing to refresh right now.")
+            return
+        self.load_lesson(due[0].id)
+        self.notify(
+            f"Review due: {due[0].title} ({len(due)} total) — hit \"Quiz me\" to refresh it."
+        )
+
     def action_switch_model(self) -> None:
         self.run_worker(self._switch_model(), group="model-check", exclusive=True)
 
@@ -635,6 +654,7 @@ class TutorApp(App):
         self._flush_lesson_time()
         self._save_editor_code()
         self.current_lesson_id = lesson_id
+        progress.save_last_lesson(lesson_id)
         self.lesson_start = time.monotonic()
         self.query_one("#code-editor", TextArea).text = progress.get_code(lesson_id)
         self._code_loaded_for = lesson_id
@@ -998,21 +1018,37 @@ class TutorApp(App):
         output_log = self.query_one("#code-output", RichLog)
         run_btn = self.query_one("#run-btn", Button)
         output_log.clear()
-        output_log.write("[dim]running...[/dim]")
         run_btn.disabled = True
+
+        # Stream output live as the kernel produces it (a training loop
+        # printing per epoch shouldn't look frozen for a minute). Chunks
+        # arrive on the kernel thread and may be partial lines; buffer to
+        # line boundaries before writing.
+        buffers = {"stdout": "", "stderr": ""}
+
+        def write_line(name: str, line: str) -> None:
+            output_log.write(f"[red]{line}[/red]" if name == "stderr" else line)
+
+        def on_chunk(name: str, text: str) -> None:
+            buffers[name] += text
+            while "\n" in buffers[name]:
+                line, buffers[name] = buffers[name].split("\n", 1)
+                self.call_from_thread(write_line, name, line)
+
+        started = time.monotonic()
         try:
             # Kernel call blocks up to kernel.TIMEOUT_SECONDS; keep the UI alive.
-            result = await asyncio.to_thread(kernel.run_code, code)
+            result = await asyncio.to_thread(kernel.run_code, code, on_chunk)
         finally:
             run_btn.disabled = False
         self.last_run_result = result
-        output_log.clear()
-        if result.stdout:
-            output_log.write(result.stdout)
-        if result.stderr:
-            output_log.write(f"[red]{result.stderr}[/red]")
+        for name, rest in buffers.items():
+            if rest:
+                write_line(name, rest)
         if not result.stdout and not result.stderr:
             output_log.write("[dim](no output)[/dim]")
+        status = "interrupted" if result.timed_out else "done"
+        output_log.write(f"[dim][{status} in {time.monotonic() - started:.1f}s][/dim]")
 
     async def send_code_output_to_tutor(self) -> None:
         code = self.query_one("#code-editor", TextArea).text

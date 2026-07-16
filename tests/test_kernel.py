@@ -48,3 +48,14 @@ def test_restart_clears_state():
     kernel.restart()
     result = kernel.run_code("print(y)")
     assert "NameError" in result.stderr
+
+
+def test_output_streams_via_callback():
+    chunks: list[tuple[str, str]] = []
+    result = kernel.run_code(
+        "for i in range(3): print('line', i)",
+        on_output=lambda name, text: chunks.append((name, text)),
+    )
+    streamed = "".join(text for _, text in chunks)
+    assert "line 0" in streamed and "line 2" in streamed
+    assert result.stdout  # full output still returned

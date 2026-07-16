@@ -122,6 +122,16 @@ def clear_history(lesson_id: str) -> None:
     _save(state)
 
 
+def get_last_lesson() -> str | None:
+    return _load().get("last_lesson")
+
+
+def save_last_lesson(lesson_id: str) -> None:
+    state = _load()
+    state["last_lesson"] = lesson_id
+    _save(state)
+
+
 def get_model() -> str | None:
     return _load().get("model")
 

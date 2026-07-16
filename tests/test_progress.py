@@ -132,3 +132,11 @@ def test_weak_quiz_score_brings_review_forward():
     # a strong retake restores the normal interval
     progress.record_quiz_score("l1", 5, 5)
     assert not progress.is_review_due("l1")
+
+
+def test_last_lesson_persists():
+    from app import progress
+
+    assert progress.get_last_lesson() is None
+    progress.save_last_lesson("ec-garch")
+    assert progress.get_last_lesson() == "ec-garch"
