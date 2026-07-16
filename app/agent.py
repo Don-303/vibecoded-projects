@@ -18,28 +18,29 @@ from app.curriculum import Lesson
 MODEL_CATALOG = [
     (
         "qwen3:4b-instruct",
-        "Best all-rounder (default). Strongest explanations and reasoning "
-        "for its speed (~7 tok/s); matches the old 7B on most benchmarks.",
+        "2.5 GB · Best all-rounder (default). Strongest explanations and "
+        "reasoning for its speed (~7 tok/s); matches the old 7B on most "
+        "benchmarks.",
     ),
     (
         "qwen2.5-coder:3b-instruct-q8_0",
-        "Code specialist at Q8 precision (~5.5 tok/s). Sharp for exercises, "
-        "code review and debugging; weaker on theory/econometrics.",
+        "3.3 GB · Code specialist at Q8 precision (~5.5 tok/s). Sharp for "
+        "exercises, code review and debugging; weaker on theory/econometrics.",
     ),
     (
         "phi4-mini",
-        "Microsoft Phi-4-mini (3.8B, ~7 tok/s). Strong at math, logic and "
-        "step-by-step derivations; terser conversational style.",
+        "2.5 GB · Microsoft Phi-4-mini (3.8B, ~7 tok/s). Strong at math, "
+        "logic and step-by-step derivations; terser conversational style.",
     ),
     (
         "qwen2.5:3b-instruct",
-        "Smallest and fastest (~8 tok/s). Fine for quick drills; noisier "
-        "on multi-step math and theory.",
+        "1.9 GB · Smallest and fastest (~8 tok/s). Fine for quick drills; "
+        "noisier on multi-step math and theory.",
     ),
     (
         "qwen2.5-coder:7b",
-        "Big code specialist, slowest (~4 tok/s). Deepest code review; "
-        "weakest tradeoff for concept teaching.",
+        "4.7 GB · Big code specialist, slowest (~4 tok/s). Deepest code "
+        "review; weakest tradeoff for concept teaching.",
     ),
 ]
 
