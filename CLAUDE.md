@@ -79,8 +79,12 @@ to the local instance regardless of that env var.
 - `scripts/build_rag_index.py` — one-time (re-runnable) setup: clones all
   corpora into `corpus/` (gitignored) and builds the embedding index.
   Needs internet only for this step.
-- `app/sandbox.py` — runs student code in a subprocess (using this venv's
-  interpreter) with a timeout, capturing stdout/stderr.
+- `app/kernel.py` — runs student code in a persistent IPython kernel
+  (ipykernel/jupyter_client, pinned to this venv's interpreter): the
+  namespace survives between runs, expression results echo like the REPL,
+  timeouts interrupt (not kill) the kernel, matplotlib figures are saved
+  to data/plots/ after each run, and restart() wipes state. Started
+  lazily + warmed at app start; shut down on quit and via atexit.
 - `app/theming.py` — maps the desktop theme to a Textual theme (Omarchy
   theme.name → same-named/renamed builtin, light.mode marker or gsettings
   for light/dark fallback). Polled every 3s off-thread from `main.py`;

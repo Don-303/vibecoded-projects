@@ -18,6 +18,7 @@ dependencies = [
     "torch",
     "rich",
     "pyyaml",
+    "ipykernel",
 ]
 
 [project.optional-dependencies]

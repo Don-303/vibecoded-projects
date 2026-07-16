@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 from textual.widgets import Button, Select, TextArea, Tree
 
-from app import agent, progress, theming
+from app import agent, kernel, progress, theming
 from app.main import ModelPicker, TutorApp
 
 CANNED = 'Intro!\n```python\nprint(1 + 1)\n```\nReady?'
@@ -29,6 +29,8 @@ def _mocked_model(stream=_fake_stream):
     stack.enter_context(
         patch.object(theming, "system_theme", lambda builtin: "textual-dark")
     )
+    # Don't spawn a real IPython kernel per smoke test.
+    stack.enter_context(patch.object(kernel, "ensure", lambda: None))
     return stack
 
 

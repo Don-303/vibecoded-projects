@@ -31,7 +31,7 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from app import __version__, agent, curriculum, progress, rag, sandbox, theming
+from app import __version__, agent, curriculum, kernel, progress, rag, theming
 
 DEFAULT_LESSON_ID = "py-core"
 
@@ -41,7 +41,7 @@ HELP_TEXT = f"""\
 ## Keyboard shortcuts
 | Key | Action |
 | --- | --- |
-| Ctrl+R | Run the code in the editor |
+| Ctrl+R | Run the editor (or just the selected lines) in IPython |
 | Ctrl+N | Next lesson |
 | Ctrl+B | Show/hide the curriculum sidebar |
 | Ctrl+E | Show/hide the code editor panel |
@@ -65,6 +65,10 @@ Pick a lesson (filter box narrows the tree) — the tutor introduces it and
 sets an exercise. Write code in the editor, Ctrl+R to run, then "Send
 output to tutor" for review. Mark the lesson complete when it clicks;
 it returns for spaced review a week later (↻ in the tree).
+
+The editor runs on a persistent IPython kernel: variables survive between
+runs, a bare expression on the last line echoes its value, and selecting
+lines runs just those. "Restart" wipes the kernel's variables.
 
 The tutor style selector (header) switches how it teaches this lesson:
 standard, Socratic questioning, or layered explanations.
@@ -327,7 +331,7 @@ class TutorApp(App):
         self.chat_buffer = ""
         self.session_start = time.monotonic()
         self.lesson_start: float | None = None
-        self.last_run_result: sandbox.RunResult | None = None
+        self.last_run_result: kernel.RunResult | None = None
         # Which lesson's code currently occupies the editor -- None until the
         # first load so app start can't clobber saved code with an empty buffer.
         self._code_loaded_for: str | None = None
@@ -424,6 +428,11 @@ class TutorApp(App):
                                         "Plots", id="plots-btn", compact=True,
                                         tooltip="Open the folder of figures saved by your runs",
                                     )
+                                    yield Button(
+                                        "Restart", id="restart-kernel-btn", compact=True,
+                                        tooltip="Restart the IPython kernel "
+                                        "(clears all variables)",
+                                    )
                                 yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
                         with VerticalScroll():
@@ -445,8 +454,11 @@ class TutorApp(App):
 
     def on_mount(self) -> None:
         self.query_one("#chat-panel").border_title = "Tutor"
-        self.query_one("#code-panel").border_title = "Code editor"
+        self.query_one("#code-panel").border_title = "IPython editor"
         self.query_one("#code-output", RichLog).border_title = "Output"
+        # Start the kernel while the user picks a model/lesson, so the
+        # first Run doesn't pay the kernel's cold start.
+        self.run_worker(self._warm_kernel(), group="kernel-warm")
         self.build_tree()
         self.refresh_progress_view()
         self.set_interval(1.0, self.update_session_timer)
@@ -500,9 +512,15 @@ class TutorApp(App):
             self._flush_lesson_time(restart=True)
             self._save_editor_code()
 
+    async def _warm_kernel(self) -> None:
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(kernel.ensure)
+
     async def action_quit(self) -> None:
         self._flush_lesson_time()
         self._save_editor_code()
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(kernel.shutdown)
         self.exit()
 
     def _save_editor_code(self) -> None:
@@ -924,10 +942,15 @@ class TutorApp(App):
             self.query_one("#code-editor", TextArea).text = ""
             self.query_one("#code-output", RichLog).clear()
             self.last_run_result = None
+        elif event.button.id == "restart-kernel-btn":
+            self.notify("Restarting the IPython kernel...")
+            await asyncio.to_thread(kernel.restart)
+            self.query_one("#code-output", RichLog).clear()
+            self.notify("Kernel restarted — all variables cleared.")
         elif event.button.id == "plots-btn":
-            if sandbox.PLOTS_DIR.is_dir() and any(sandbox.PLOTS_DIR.iterdir()):
+            if kernel.PLOTS_DIR.is_dir() and any(kernel.PLOTS_DIR.iterdir()):
                 subprocess.Popen(
-                    ["xdg-open", str(sandbox.PLOTS_DIR)],
+                    ["xdg-open", str(kernel.PLOTS_DIR)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
@@ -968,15 +991,18 @@ class TutorApp(App):
         self.run_worker(self._run_code_worker(), exclusive=True, group="run-code")
 
     async def _run_code_worker(self) -> None:
-        code = self.query_one("#code-editor", TextArea).text
+        editor = self.query_one("#code-editor", TextArea)
+        # IPython-style incremental work: a selection runs alone against the
+        # kernel's persistent namespace; no selection runs the whole buffer.
+        code = editor.selected_text or editor.text
         output_log = self.query_one("#code-output", RichLog)
         run_btn = self.query_one("#run-btn", Button)
         output_log.clear()
         output_log.write("[dim]running...[/dim]")
         run_btn.disabled = True
         try:
-            # Subprocess call blocks up to sandbox.TIMEOUT_SECONDS; keep the UI alive.
-            result = await asyncio.to_thread(sandbox.run_code, code)
+            # Kernel call blocks up to kernel.TIMEOUT_SECONDS; keep the UI alive.
+            result = await asyncio.to_thread(kernel.run_code, code)
         finally:
             run_btn.disabled = False
         self.last_run_result = result

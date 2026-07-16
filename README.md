@@ -66,10 +66,14 @@ starting the app.
   **Socratic** (leads you to answers with guiding questions and a hint
   ladder), or **explainer** (layered explanations: one-liner → why →
   analogy → worked example → check). The choice is remembered per lesson.
-- Run code with Ctrl+R (or the Run button), then "Send output to tutor" to
-  get it reviewed. Matplotlib figures are saved to `data/plots/` (the path
-  is printed in the output pane; the "Plots" button opens the folder in
-  your image viewer). A Stop button cancels a slow reply.
+- The editor runs on a persistent IPython kernel: run with Ctrl+R (or the
+  Run button) and variables survive between runs — build up your analysis
+  incrementally like a notebook. Selecting lines runs just the selection;
+  a bare expression echoes its value like the REPL; errors come back as
+  real tracebacks. "Restart" wipes the kernel's variables. Then "Send
+  output to tutor" to get the run reviewed. Matplotlib figures are saved
+  to `data/plots/` (the "Plots" button opens the folder in your image
+  viewer). A Stop button cancels a slow tutor reply.
 - Your editor code is saved per lesson and restored when you come back.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
 - The "Progress" tab shows overall/per-module completion, total time spent,
