@@ -57,6 +57,11 @@ FLASHCARDS_MESSAGE = (
     "cards with cloze deletions, ordered easy to hard. Output a numbered "
     "list of Q: / A: pairs I can drill."
 )
+RECAP_MESSAGE = (
+    "Recap this lesson: summarize the key takeaways we've covered so far in "
+    "at most 8 short bullet points (include formulas or code idioms where "
+    "they matter), then say in one line what's still left to cover."
+)
 
 
 class TutorApp(App):
@@ -179,6 +184,10 @@ class TutorApp(App):
                                     yield Button(
                                         "Cards", id="flashcards-btn", compact=True,
                                         tooltip="Flashcard deck (Q/A + cloze) from this lesson",
+                                    )
+                                    yield Button(
+                                        "Recap", id="recap-btn", compact=True,
+                                        tooltip="Key takeaways so far + what's left in this lesson",
                                     )
                                     yield Button(
                                         "Code → editor", id="to-editor-btn", compact=True,
@@ -446,10 +455,16 @@ class TutorApp(App):
         # Re-parsing the whole markdown document per token is O(n^2) over the
         # conversation and competes with Ollama for CPU; render at most ~4x/s.
         last_render = 0.0
+        started = time.monotonic()
+        first_token_at: float | None = None
+        n_tokens = 0
         try:
             async for token in agent.stream_reply(
                 lesson, history, user_message, self._current_skill()
             ):
+                if first_token_at is None:
+                    first_token_at = time.monotonic()
+                n_tokens += 1
                 reply_so_far += token
                 now = time.monotonic()
                 if now - last_render >= 0.25:
@@ -460,6 +475,15 @@ class TutorApp(App):
             reply_so_far = f"_Error talking to local model: {exc}_"
 
         self.chat_buffer += reply_so_far
+        # Speed stats for the reply (each stream chunk is ~one token). Shown
+        # in the chat only -- never persisted, so they don't pollute the
+        # model's context on later turns.
+        if first_token_at is not None and n_tokens > 1:
+            gen_secs = time.monotonic() - first_token_at
+            rate = f" · {n_tokens / gen_secs:.1f} tok/s" if gen_secs > 0 else ""
+            self.chat_buffer += (
+                f"\n\n_[first token {first_token_at - started:.1f}s{rate}]_"
+            )
         await chat_log.update(self.chat_buffer)
         self._scroll_chat_to_end()
         progress.append_history(self.current_lesson_id, "assistant", reply_so_far)
@@ -548,6 +572,8 @@ class TutorApp(App):
             await self.send_to_tutor(QUIZ_MESSAGE)
         elif event.button.id == "flashcards-btn":
             await self.send_to_tutor(FLASHCARDS_MESSAGE)
+        elif event.button.id == "recap-btn":
+            await self.send_to_tutor(RECAP_MESSAGE)
         elif event.button.id == "practice-btn":
             await self.send_to_tutor(
                 "Give me a practice exercise for this lesson: skeleton Python "

@@ -44,8 +44,13 @@ starting the app.
   types across sub-topics with a difficulty spread, one at a time, graded
   as you go), "Practice" (skeleton code with TODOs), "Example" (complete
   runnable code), "Cards" (an atomic Q/A + cloze flashcard deck from the
-  lesson), and "Code → editor" (drops the tutor's last code block into
-  the editor).
+  lesson), "Recap" (key takeaways so far + what's left — useful before
+  marking a lesson complete), and "Code → editor" (drops the tutor's last
+  code block into the editor).
+- Each reply ends with a dim speed line (time to first token · tok/s), so
+  you can tell a cold prompt from a warm one. Very long lesson chats are
+  trimmed automatically (oldest turns first) so the tutor never loses the
+  lesson source material to context overflow.
 - A per-lesson tutor style selector sits in the header: **standard**,
   **Socratic** (leads you to answers with guiding questions and a hint
   ladder), or **explainer** (layered explanations: one-liner → why →

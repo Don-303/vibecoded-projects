@@ -195,6 +195,46 @@ async def _lesson_extra_block(lesson: Lesson) -> str:
     return block
 
 
+# History budget: keep the whole prompt (system ~600 tok + sources ~2000 tok
+# + history + reply headroom) inside NUM_CTX, since overflow makes Ollama
+# silently drop prompt from the front -- losing the lesson material AND
+# breaking the prefix cache every turn. ~3.5 chars/token, so 12000 chars is
+# ~3400 tokens of history. Trimming uses two watermarks so it happens in
+# chunks: when history passes HIGH it is cut back to LOW, then the kept
+# window stays byte-stable (prefix-cacheable) until it regrows past HIGH.
+# Each trim costs one re-prefill; a naive "keep the last N that fit" would
+# slide the window and re-prefill every single turn.
+HISTORY_HIGH_CHARS = 12000
+HISTORY_LOW_CHARS = 7000
+
+TRIM_NOTE = {
+    "role": "assistant",
+    "content": "[Earlier turns were trimmed to fit the context window. "
+    "The lesson has progressed past the opening sections; continue from "
+    "the conversation below, not from the start.]",
+}
+
+
+def _fit_history(history: list[dict]) -> list[dict]:
+    """Return the suffix of history that fits the budget, replaying growth
+    chronologically so the cut point is deterministic and only advances in
+    chunks (identical result whether computed incrementally or from scratch)."""
+    cut = 0
+    size = 0
+    for i, turn in enumerate(history):
+        size += len(turn["content"])
+        if size > HISTORY_HIGH_CHARS:
+            while size > HISTORY_LOW_CHARS and cut < i:
+                size -= len(history[cut]["content"])
+                cut += 1
+    # Start the kept window on a user turn so the transcript reads naturally.
+    while cut < len(history) and history[cut]["role"] != "user":
+        cut += 1
+    if cut == 0:
+        return history
+    return [TRIM_NOTE] + history[cut:]
+
+
 async def stream_reply(
     lesson: Lesson, history: list[dict], user_message: str, skill_name: str | None = None
 ) -> AsyncIterator[str]:
@@ -203,7 +243,7 @@ async def stream_reply(
     messages = [
         {"role": "system", "content": system_prompt(lesson, extra_block, skill_name)}
     ]
-    messages.extend(history)
+    messages.extend(_fit_history(history))
     messages.append({"role": "user", "content": user_message})
 
     async for chunk in await _client.chat(
@@ -236,7 +276,7 @@ async def prewarm(lesson: Lesson, history: list[dict], skill_name: str | None = 
     messages = [
         {"role": "system", "content": system_prompt(lesson, extra_block, skill_name)}
     ]
-    messages.extend(history)
+    messages.extend(_fit_history(history))
     try:
         await _client.chat(
             model=MODEL,

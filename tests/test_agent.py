@@ -71,3 +71,36 @@ def test_extra_block_is_appended_last():
     lesson = _lesson("python-foundations", "Python Foundations")
     prompt = agent.system_prompt(lesson, "EXTRA-BLOCK")
     assert prompt.endswith("EXTRA-BLOCK")
+
+
+def _turns(n: int, chars: int = 1000) -> list[dict]:
+    return [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"t{i}:" + "x" * chars}
+        for i in range(n)
+    ]
+
+
+def test_fit_history_untouched_under_budget():
+    history = _turns(6)
+    assert agent._fit_history(history) == history
+
+
+def test_fit_history_trims_to_low_watermark_with_note():
+    history = _turns(24)
+    fitted = agent._fit_history(history)
+    assert fitted[0] == agent.TRIM_NOTE
+    assert fitted[1]["role"] == "user"
+    kept = sum(len(t["content"]) for t in fitted[1:])
+    assert kept <= agent.HISTORY_HIGH_CHARS
+    # the newest turns are always kept
+    assert fitted[-1] == history[-1]
+
+
+def test_fit_history_cut_is_stable_as_history_grows():
+    """The kept window must stay byte-identical across a few new turns
+    (prefix-cache requirement) -- the cut only advances in chunks."""
+    history = _turns(24)
+    before = agent._fit_history(history)
+    grown = history + _turns(2, chars=200)
+    after = agent._fit_history(grown)
+    assert after[: len(before)] == before

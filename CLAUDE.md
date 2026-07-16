@@ -47,7 +47,12 @@ to the local instance regardless of that env var.
   byte-identical across turns within a lesson so llama.cpp's prefix cache
   skips re-prefilling the conversation (measured: 81.5s → 1.7s to first
   token on the second message). Retrieval is therefore keyed on the lesson
-  title only, never the user's message. `agent.prewarm()` extends this to
+  title only, never the user's message. Long chats are bounded by
+  `_fit_history()` (12k/7k-char high/low watermarks): trims happen in
+  chunks so the kept window stays byte-stable between trims -- a naive
+  keep-the-last-N-that-fit would slide every turn and re-prefill each
+  message; it also keeps the whole prompt inside `num_ctx` so Ollama never
+  silently drops the lesson source. `agent.prewarm()` extends this to
   the *first* message too: opening a lesson with history fires a debounced
   background 1-token request that prefills the prompt cache, so the first
   real message also starts in ~2s (fresh lessons get the same effect from
