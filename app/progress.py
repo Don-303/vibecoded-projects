@@ -89,6 +89,16 @@ def clear_history(lesson_id: str) -> None:
     _save(state)
 
 
+def get_model() -> str | None:
+    return _load().get("model")
+
+
+def save_model(tag: str) -> None:
+    state = _load()
+    state["model"] = tag
+    _save(state)
+
+
 def get_teaching_skill(lesson_id: str) -> str | None:
     return _load()["teaching_skill"].get(lesson_id)
 

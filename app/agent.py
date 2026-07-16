@@ -8,13 +8,51 @@ from ollama import AsyncClient
 from app import rag, skills
 from app.curriculum import Lesson
 
-# General-purpose instruct model rather than the Coder variant: this tutor
-# mostly explains concepts (econometrics, portfolio theory, etc.) and only
-# secondarily reviews code. Qwen3-4B-Instruct matches or beats Qwen2.5-7B on
-# reasoning benchmarks at roughly double the tokens/sec on this CPU-only
-# machine. The exact tag matters: qwen3:4b-instruct is the non-thinking 2507
-# build; plain qwen3:4b would burn NUM_PREDICT on hidden reasoning tokens.
-MODEL = "qwen3:4b-instruct"
+# The launch-time picker (app/main.py ModelPicker) chooses from this catalog;
+# descriptions are shown to the student. Speeds measured on this CPU-only
+# machine. Default is the general instruct model rather than a Coder variant:
+# this tutor mostly explains concepts (econometrics, portfolio theory, etc.)
+# and only secondarily reviews code. The exact qwen3 tag matters:
+# qwen3:4b-instruct is the non-thinking 2507 build; plain qwen3:4b would burn
+# NUM_PREDICT on hidden reasoning tokens.
+MODEL_CATALOG = [
+    (
+        "qwen3:4b-instruct",
+        "Best all-rounder (default). Strongest explanations and reasoning "
+        "for its speed (~7 tok/s); matches the old 7B on most benchmarks.",
+    ),
+    (
+        "qwen2.5-coder:3b-instruct-q8_0",
+        "Code specialist at Q8 precision (~5.5 tok/s). Sharp for exercises, "
+        "code review and debugging; weaker on theory/econometrics.",
+    ),
+    (
+        "phi4-mini",
+        "Microsoft Phi-4-mini (3.8B, ~7 tok/s). Strong at math, logic and "
+        "step-by-step derivations; terser conversational style.",
+    ),
+    (
+        "qwen2.5:3b-instruct",
+        "Smallest and fastest (~8 tok/s). Fine for quick drills; noisier "
+        "on multi-step math and theory.",
+    ),
+    (
+        "qwen2.5-coder:7b",
+        "Big code specialist, slowest (~4 tok/s). Deepest code review; "
+        "weakest tradeoff for concept teaching.",
+    ),
+]
+
+DEFAULT_MODEL = MODEL_CATALOG[0][0]
+
+# The active model. Set once at launch by the picker (set_model); requests
+# read it at call time.
+MODEL = DEFAULT_MODEL
+
+
+def set_model(tag: str) -> None:
+    global MODEL
+    MODEL = tag
 
 # The model's native window is far larger; 8192 comfortably fits a full source
 # lecture or two plus conversation history without the extra prefill cost of
@@ -288,10 +326,20 @@ async def prewarm(lesson: Lesson, history: list[dict], skill_name: str | None = 
         pass  # best-effort: the real message will just pay the prefill
 
 
-async def check_model_available() -> bool:
+async def installed_models() -> set[str]:
+    """Model tags present on the local Ollama; empty if it's unreachable."""
     try:
         models = await _client.list()
-        names = [m.get("model", m.get("name", "")) for m in models.get("models", [])]
-        return any(MODEL in n for n in names)
+        return {m.get("model", m.get("name", "")) for m in models.get("models", [])}
     except Exception:
-        return False
+        return set()
+
+
+def is_installed(tag: str, installed: set[str]) -> bool:
+    # Ollama lists fully-qualified tags ("phi4-mini:latest"), so match on
+    # prefix rather than equality.
+    return any(name == tag or name.startswith(tag + ":") for name in installed)
+
+
+async def check_model_available() -> bool:
+    return is_installed(MODEL, await installed_models())

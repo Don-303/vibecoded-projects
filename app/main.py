@@ -11,12 +11,14 @@ import time
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
     Footer,
     Header,
     Input,
     Markdown,
+    OptionList,
     RichLog,
     Select,
     Static,
@@ -25,6 +27,7 @@ from textual.widgets import (
     TextArea,
     Tree,
 )
+from textual.widgets.option_list import Option
 
 from app import agent, curriculum, progress, sandbox
 
@@ -62,6 +65,39 @@ RECAP_MESSAGE = (
     "at most 8 short bullet points (include formulas or code idioms where "
     "they matter), then say in one line what's still left to cover."
 )
+
+
+class ModelPicker(ModalScreen[str]):
+    """Launch-time model chooser: the catalog with one-line descriptions and
+    install status. Enter selects; the previous session's model is
+    preselected, so Enter alone keeps your usual choice."""
+
+    def __init__(self, installed: set[str], preselect: str) -> None:
+        super().__init__()
+        self._installed = installed
+        self._preselect = preselect
+
+    def compose(self) -> ComposeResult:
+        options = []
+        for tag, desc in agent.MODEL_CATALOG:
+            if agent.is_installed(tag, self._installed):
+                mark = "[green]✓ installed[/green]"
+            else:
+                mark = f"[yellow]not installed — ollama pull {tag}[/yellow]"
+            options.append(Option(f"[b]{tag}[/b]  {mark}\n[dim]{desc}[/dim]\n", id=tag))
+        with Vertical(id="model-dialog"):
+            yield Static("[b]Choose the tutor model for this session[/b]", id="model-title")
+            yield OptionList(*options, id="model-list")
+            yield Static("[dim]↑/↓ to browse · Enter to start[/dim]", id="model-hint")
+
+    def on_mount(self) -> None:
+        option_list = self.query_one(OptionList)
+        tags = [tag for tag, _ in agent.MODEL_CATALOG]
+        option_list.highlighted = tags.index(self._preselect) if self._preselect in tags else 0
+        option_list.focus()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
 
 
 class TutorApp(App):
@@ -118,6 +154,24 @@ class TutorApp(App):
     #code-output {
         height: 10;
         border-top: solid $accent;
+    }
+    ModelPicker {
+        align: center middle;
+    }
+    #model-dialog {
+        width: 90;
+        height: auto;
+        max-height: 80%;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #model-title, #model-hint {
+        padding: 0 1;
+    }
+    #model-list {
+        height: auto;
+        margin: 1 0;
     }
     """
 
@@ -244,11 +298,22 @@ class TutorApp(App):
 
     def on_mount(self) -> None:
         self.build_tree()
-        self.load_lesson(self.current_lesson_id)
         self.refresh_progress_view()
-        self.run_worker(self.check_model(), group="model-check")
         self.set_interval(1.0, self.update_session_timer)
+        # Lesson loading waits for the model choice so the auto-started
+        # intro (and the warm-up) run against the chosen model.
+        self.run_worker(self._pick_model_and_start(), group="model-check")
+
+    async def _pick_model_and_start(self) -> None:
+        installed = await agent.installed_models()
+        preselect = progress.get_model() or agent.DEFAULT_MODEL
+        chosen = await self.push_screen_wait(ModelPicker(installed, preselect))
+        agent.set_model(chosen)
+        progress.save_model(chosen)
+        self.sub_title = f"offline ML-for-finance tutor · {chosen}"
+        self.load_lesson(self.current_lesson_id)
         self.query_one("#chat-input", Input).focus()
+        await self.check_model()
 
     def update_session_timer(self) -> None:
         elapsed = int(time.monotonic() - self.session_start)

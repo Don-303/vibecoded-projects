@@ -2,8 +2,11 @@
 
 Offline, terminal-based interactive tutor for learning Python, machine
 learning, econometrics, and quantitative finance. The tutor is a local LLM
-(Qwen3-4B-Instruct via Ollama) — no internet connection needed once the
-model is downloaded.
+served by Ollama — no internet connection needed once a model is
+downloaded. At launch you pick the model for the session from a small
+catalog (Qwen3-4B-Instruct is the recommended default; a Q8 coder model,
+Phi-4-mini, and others are listed with one-line descriptions and install
+status); the choice is remembered for next time.
 
 ## Setup
 
@@ -11,7 +14,8 @@ model is downloaded.
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# pull the model once (needs internet the first time only)
+# pull at least the default model once (needs internet the first time only);
+# the launch picker shows the full catalog and how to pull the others
 OLLAMA_HOST=http://127.0.0.1:11434 ollama pull qwen3:4b-instruct
 ```
 

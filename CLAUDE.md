@@ -3,9 +3,11 @@
 ## What this is
 
 An offline, terminal-based interactive tutor for learning Python, ML,
-econometrics, and quantitative finance. The tutor is a local LLM
-(Qwen3-4B-Instruct) served by Ollama — no network required after the model
-is pulled.
+econometrics, and quantitative finance. The tutor is a local LLM served by
+Ollama — chosen per session from `agent.MODEL_CATALOG` via a launch-time
+picker (default qwen3:4b-instruct; last choice persisted in
+progress.json's `model` key). No network required after the models are
+pulled.
 
 ## Run it
 
