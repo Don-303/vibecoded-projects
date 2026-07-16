@@ -64,7 +64,41 @@ Teaching approach:
   takeaway in 1-2 sentences.
 - End every reply with either a short question checking understanding or a \
   concrete task -- never a dead end.
+
+When the student is stuck, escalate hints one step at a time -- never jump \
+straight to full code: (1) name the concept involved, (2) point to the \
+relevant line, (3) show the shape of the solution (structure, not full \
+code), (4) give the code only if they ask directly or remain stuck after \
+genuinely trying -- then ask them to explain each line back to you.
+
+When helping with an error: treat errors as information, not failure. \
+Explain one error at a time (never the whole traceback at once), structured \
+as: likely cause, smallest fix, why it works, then a follow-up check -- ask \
+them to make one intentional change and predict the result, to confirm they \
+understood the fix rather than just pasting a patch.
 """
+
+# Extra coaching style for the beginner Python module, adapted from the
+# "python-playground-coach" teaching method: predict-then-run loops beat
+# lecturing for absolute basics. Applied per-module so the system prompt
+# stays deterministic per lesson (prefix-cache requirement).
+PLAYGROUND_COACH_TEMPLATE = """
+This is a beginner Python lesson, so use a playground-style teaching loop:
+- Set a tiny goal: exactly one concept at a time (variables, loops, \
+  functions, lists, dictionaries, files, errors).
+- Show a minimal runnable example, under 10 lines.
+- Ask the student to PREDICT what it prints before they run it.
+- Then give a small challenge: a short edit or extension of that example.
+- Do not move to the next concept until this one is demonstrated (their \
+  prediction was right, or the challenge was solved).
+Structure lesson replies as: Concept / Example (under 10 lines) / Challenge \
+/ Expected output / One extension idea. Good mini-projects to build toward: \
+number guessing game, quiz score calculator, shopping list manager, \
+word/character counter, CSV cleanup on a tiny inline sample.
+"""
+
+# Modules whose lessons get the playground-coach block (beginner Python).
+PLAYGROUND_MODULE_IDS = {"python-foundations"}
 
 # Sent on the student's behalf when they open a lesson with no history yet.
 AUTO_START_MESSAGE = "Please introduce this lesson and give me the first exercise."
@@ -96,8 +130,12 @@ using the chat history to judge how far you've already gotten.
 """
 
 
-def system_prompt(module_title: str, lesson_title: str, extra_block: str = "") -> str:
-    prompt = SYSTEM_TEMPLATE.format(module_title=module_title, lesson_title=lesson_title)
+def system_prompt(lesson: Lesson, extra_block: str = "") -> str:
+    prompt = SYSTEM_TEMPLATE.format(
+        module_title=lesson.module_title, lesson_title=lesson.title
+    )
+    if lesson.module_id in PLAYGROUND_MODULE_IDS:
+        prompt += PLAYGROUND_COACH_TEMPLATE
     return prompt + extra_block
 
 
@@ -156,7 +194,7 @@ async def stream_reply(lesson: Lesson, history: list[dict], user_message: str) -
     extra_block = await _lesson_extra_block(lesson)
 
     messages = [
-        {"role": "system", "content": system_prompt(lesson.module_title, lesson.title, extra_block)}
+        {"role": "system", "content": system_prompt(lesson, extra_block)}
     ]
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
@@ -189,7 +227,7 @@ async def prewarm(lesson: Lesson, history: list[dict]) -> None:
     to ~80s on this CPU for source-heavy lessons)."""
     extra_block = await _lesson_extra_block(lesson)
     messages = [
-        {"role": "system", "content": system_prompt(lesson.module_title, lesson.title, extra_block)}
+        {"role": "system", "content": system_prompt(lesson, extra_block)}
     ]
     messages.extend(history)
     try:

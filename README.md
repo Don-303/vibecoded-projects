@@ -36,6 +36,10 @@ starting the app.
 - The workspace shows the tutor chat and the code editor side by side
   (Ctrl+E hides/shows the editor pane). Opening a fresh lesson auto-starts
   it: the tutor introduces the concept and gives you an exercise.
+- Beginner Python lessons use a playground-style loop: a tiny runnable
+  example, a "what do you think this prints?" prediction, then a small
+  challenge. Everywhere, hints escalate gradually (concept → line →
+  solution shape → code) and errors are debugged one at a time.
 - Chat action buttons: "Quiz me", "Practice exercise" (skeleton code with
   TODOs), "Worked example" (complete runnable code), and "Code → editor"
   (drops the tutor's last code block into the editor).
