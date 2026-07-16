@@ -6,6 +6,7 @@ the model is pulled.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import subprocess
 import time
@@ -55,7 +56,6 @@ HELP_TEXT = f"""\
 - **Practice** — skeleton code with TODOs to fill in.
 - **Example** — a complete runnable worked example.
 - **Cards** — a flashcard deck (Q/A + cloze) from the lesson.
-- **Recap** — key takeaways so far, and what's left.
 - **Project** — three suggested mini-projects; pick one and it's walked
   through in stages (data → exploration → model → evaluation → report).
 - **Code → editor** — copy the tutor's last code block into the editor.
@@ -101,11 +101,6 @@ FLASHCARDS_MESSAGE = (
     "must force recall, not recognition (prefer why/how over what); mix Q/A "
     "cards with cloze deletions, ordered easy to hard. Output a numbered "
     "list of Q: / A: pairs I can drill."
-)
-RECAP_MESSAGE = (
-    "Recap this lesson: summarize the key takeaways we've covered so far in "
-    "at most 8 short bullet points (include formulas or code idioms where "
-    "they matter), then say in one line what's still left to cover."
 )
 PROJECT_MESSAGE = (
     "Suggest 3 quant finance mini-projects that build on this lesson, sized "
@@ -382,10 +377,6 @@ class TutorApp(App):
                                     yield Button(
                                         "Cards", id="flashcards-btn", compact=True,
                                         tooltip="Flashcard deck (Q/A + cloze) from this lesson",
-                                    )
-                                    yield Button(
-                                        "Recap", id="recap-btn", compact=True,
-                                        tooltip="Key takeaways so far + what's left in this lesson",
                                     )
                                     yield Button(
                                         "Project", id="project-btn", compact=True,
@@ -734,9 +725,12 @@ class TutorApp(App):
         self.chat_buffer += f"{separator}**Tutor**:\n\n"
         reply_so_far = ""
         chat_log = self.query_one("#chat-log", Markdown)
-        # First token can take a while on CPU -- show that something is happening.
+        # The wait for the first token (prompt prefill) can be long on CPU --
+        # tick the elapsed time so it reads as loading, not frozen. The reply
+        # itself streams in token by token below.
         await chat_log.update(self.chat_buffer + "_Thinking..._")
         self._scroll_chat_to_end()
+        ticker = asyncio.create_task(self._animate_thinking(chat_log))
         # Re-parsing the whole markdown document per token is O(n^2) over the
         # conversation and competes with Ollama for CPU; render at most ~4x/s.
         last_render = 0.0
@@ -749,6 +743,7 @@ class TutorApp(App):
             ):
                 if first_token_at is None:
                     first_token_at = time.monotonic()
+                    ticker.cancel()
                 n_tokens += 1
                 reply_so_far += token
                 now = time.monotonic()
@@ -763,6 +758,8 @@ class TutorApp(App):
                 "and the model is installed — Ctrl+T to pick another model, "
                 "then resend your message._"
             )
+        finally:
+            ticker.cancel()
 
         self.chat_buffer += reply_so_far
         # Speed stats for the reply (each stream chunk is ~one token). Shown
@@ -788,6 +785,16 @@ class TutorApp(App):
         self.refresh_progress_view()
         self.refresh_tree()  # a weak score can change the review-due glyph
         self.notify(f"Quiz score recorded: {correct}/{total}")
+
+    async def _animate_thinking(self, chat_log: Markdown) -> None:
+        """Tick the elapsed wait time under the chat until the first token
+        arrives (the caller cancels this task at that point)."""
+        started = time.monotonic()
+        with contextlib.suppress(asyncio.CancelledError):
+            while True:
+                await asyncio.sleep(1.0)
+                elapsed = int(time.monotonic() - started)
+                await chat_log.update(self.chat_buffer + f"_Thinking... {elapsed}s_")
 
     def _scroll_chat_to_end(self) -> None:
         self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
@@ -891,8 +898,6 @@ class TutorApp(App):
             await self.send_to_tutor(QUIZ_MESSAGE)
         elif event.button.id == "flashcards-btn":
             await self.send_to_tutor(FLASHCARDS_MESSAGE)
-        elif event.button.id == "recap-btn":
-            await self.send_to_tutor(RECAP_MESSAGE)
         elif event.button.id == "project-btn":
             await self.send_to_tutor(PROJECT_MESSAGE)
         elif event.button.id == "practice-btn":

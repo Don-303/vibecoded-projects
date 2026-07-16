@@ -51,9 +51,8 @@ starting the app.
   types across sub-topics with a difficulty spread, one at a time, graded
   as you go), "Practice" (skeleton code with TODOs), "Example" (complete
   runnable code), "Cards" (an atomic Q/A + cloze flashcard deck from the
-  lesson), "Recap" (key takeaways so far + what's left — useful before
-  marking a lesson complete), and "Code → editor" (drops the tutor's last
-  code block into the editor).
+  lesson), and "Code → editor" (drops the tutor's last code block into
+  the editor).
 - The app follows your desktop theme, live: if your system theme has a
   Textual counterpart (nord, gruvbox, tokyo-night, catppuccin, …) it's
   used directly, otherwise the app just matches light/dark. Switching the

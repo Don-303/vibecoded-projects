@@ -74,7 +74,7 @@ def test_boot_picker_autostart_and_layout():
 
                 # all action buttons exist
                 for bid in ("quiz-btn", "practice-btn", "example-btn",
-                            "flashcards-btn", "recap-btn", "project-btn",
+                            "flashcards-btn", "project-btn",
                             "to-editor-btn", "stop-btn",
                             "reset-btn"):
                     app.query_one(f"#{bid}", Button)
