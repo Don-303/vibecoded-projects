@@ -4,7 +4,7 @@
 
 An offline, terminal-based interactive tutor for learning Python, ML,
 econometrics, and quantitative finance. The tutor is a local LLM
-(Qwen2.5-7B-Instruct) served by Ollama — no network required after the model
+(Qwen3-4B-Instruct) served by Ollama — no network required after the model
 is pulled.
 
 ## Run it
@@ -19,7 +19,7 @@ to `PYTHONPATH` if invoking from elsewhere.)
 Requires the Ollama service running locally with the model pulled:
 
 ```
-OLLAMA_HOST=http://127.0.0.1:11434 ollama pull qwen2.5:7b-instruct
+OLLAMA_HOST=http://127.0.0.1:11434 ollama pull qwen3:4b-instruct
 ```
 
 Note: this machine's shell sets `OLLAMA_HOST` to a remote Tailscale peer.

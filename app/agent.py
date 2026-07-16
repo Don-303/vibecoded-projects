@@ -10,11 +10,13 @@ from app.curriculum import Lesson
 
 # General-purpose instruct model rather than the Coder variant: this tutor
 # mostly explains concepts (econometrics, portfolio theory, etc.) and only
-# secondarily reviews code, and Qwen2.5-Coder is specialized away from that
-# broader reasoning/knowledge in favor of code benchmarks.
-MODEL = "qwen2.5:7b-instruct"
+# secondarily reviews code. Qwen3-4B-Instruct matches or beats Qwen2.5-7B on
+# reasoning benchmarks at roughly double the tokens/sec on this CPU-only
+# machine. The exact tag matters: qwen3:4b-instruct is the non-thinking 2507
+# build; plain qwen3:4b would burn NUM_PREDICT on hidden reasoning tokens.
+MODEL = "qwen3:4b-instruct"
 
-# Qwen2.5:7b-instruct supports 32k; 8192 comfortably fits a full source
+# The model's native window is far larger; 8192 comfortably fits a full source
 # lecture or two plus conversation history without the extra prefill cost of
 # the full window on CPU-only inference.
 NUM_CTX = 8192
@@ -40,7 +42,7 @@ _client = AsyncClient(host="http://127.0.0.1:11434")
 
 SYSTEM_TEMPLATE = """You are an interactive, patient tutor teaching machine \
 learning for finance, econometrics, and quantitative finance. You are running \
-fully offline as a local 7B model, so keep explanations concise and concrete -- \
+fully offline as a small local model, so keep explanations concise and concrete -- \
 prefer short explanations plus a small runnable code exercise over long essays.
 
 Current module: {module_title}
