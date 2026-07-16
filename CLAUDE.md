@@ -79,6 +79,12 @@ to the local instance regardless of that env var.
 - `scripts/build_rag_index.py` — one-time (re-runnable) setup: clones all
   corpora into `corpus/` (gitignored) and builds the embedding index.
   Needs internet only for this step.
+- Tutor↔environment loop (`app/main.py`): typed questions attach the
+  editor code when changed (`_with_editor_attached`, per-lesson snapshot
+  dedupe); a reply containing a ```check fenced block (CHECK_BLOCK_RE,
+  protocol defined in agent.SYSTEM_TEMPLATE) is executed in the student's
+  kernel and the output sent back as an "[auto]" user turn, then answered
+  with allow_check=False — exactly one round per student message.
 - `app/kernel.py` — runs student code in a persistent IPython kernel
   (ipykernel/jupyter_client, pinned to this venv's interpreter): the
   namespace survives between runs, expression results echo like the REPL,

@@ -71,6 +71,11 @@ The editor runs on a persistent IPython kernel: variables survive between
 runs, a bare expression on the last line echoes its value, and selecting
 lines runs just those. "Restart" wipes the kernel's variables.
 
+The tutor is connected to your environment: typed questions automatically
+attach your editor code when it changed, and the tutor can run a small
+check in your kernel (you'll see the check and its output in the chat)
+to verify your work against your actual variables.
+
 The tutor style selector (header) switches how it teaches this lesson:
 standard, Socratic questioning, or layered explanations.
 """
@@ -100,6 +105,14 @@ QUIZ_MESSAGE = (
 # Matches the score line the quiz is instructed to end with; recording is
 # best-effort (a reply without it simply records nothing).
 QUIZ_SCORE_RE = re.compile(r"Final score:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)
+
+# A fenced block the tutor tags `check` runs in the student's kernel; the
+# output is sent back automatically (one round per student message).
+CHECK_BLOCK_RE = re.compile(r"```check\s*\n(.*?)```", re.DOTALL)
+CHECK_OUTPUT_LIMIT = 1500
+# Editor snapshots attached to typed questions are capped so a long script
+# can't blow up the prompt.
+ATTACH_CODE_LIMIT = 3000
 FLASHCARDS_MESSAGE = (
     "Make me a flashcard deck for this lesson: extract the 5-10 ideas most "
     "worth remembering from what we've covered. One fact per card; fronts "
@@ -338,6 +351,9 @@ class TutorApp(App):
         self.session_start = time.monotonic()
         self.lesson_start: float | None = None
         self.last_run_result: kernel.RunResult | None = None
+        # Editor snapshot last shown to the tutor, per lesson -- attach the
+        # code to a typed question only when it changed since.
+        self._attached_code: dict[str, str] = {}
         # Which lesson's code currently occupies the editor -- None until the
         # first load so app start can't clobber saved code with an empty buffer.
         self._code_loaded_for: str | None = None
@@ -712,12 +728,23 @@ class TutorApp(App):
         if not message:
             return
         event.input.value = ""
-        await self.send_to_tutor(message)
+        await self.send_to_tutor(message, attach_editor=True)
 
-    async def send_to_tutor(self, message: str) -> None:
+    def _with_editor_attached(self, message: str) -> str:
+        """Append the editor code to a typed question if it changed since the
+        tutor last saw it, so "why is my code wrong?" just works."""
+        code = self.query_one("#code-editor", TextArea).text.strip()
+        if not code or code == self._attached_code.get(self.current_lesson_id):
+            return message
+        self._attached_code[self.current_lesson_id] = code
+        return f"{message}\n\nMy current editor code:\n```python\n{code[:ATTACH_CODE_LIMIT]}\n```"
+
+    async def send_to_tutor(self, message: str, attach_editor: bool = False) -> None:
         lesson = curriculum.find_lesson(self.current_lesson_id)
         if lesson is None:
             return
+        if attach_editor:
+            message = self._with_editor_attached(message)
         history = progress.get_history(self.current_lesson_id)
         progress.append_history(self.current_lesson_id, "user", message)
         self.chat_buffer += f"\n\n---\n\n**You**:\n\n{message}\n"
@@ -759,7 +786,9 @@ class TutorApp(App):
             lesson, progress.get_history(lesson.id), progress.get_teaching_skill(lesson.id)
         )
 
-    async def stream_tutor_reply(self, lesson, history: list[dict], user_message: str) -> None:
+    async def stream_tutor_reply(
+        self, lesson, history: list[dict], user_message: str, allow_check: bool = True
+    ) -> None:
         separator = "\n\n---\n\n" if self.chat_buffer else ""
         self.chat_buffer += f"{separator}**Tutor**:\n\n"
         reply_so_far = ""
@@ -814,6 +843,30 @@ class TutorApp(App):
         self._scroll_chat_to_end()
         progress.append_history(self.current_lesson_id, "assistant", reply_so_far)
         self._maybe_record_quiz_score(reply_so_far)
+        # One automatic round: if the tutor asked to inspect the kernel,
+        # run its check and stream the follow-up (which cannot check again,
+        # bounding latency on this CPU).
+        if allow_check:
+            await self._run_tutor_check(lesson, reply_so_far)
+
+    async def _run_tutor_check(self, lesson, reply: str) -> None:
+        match = CHECK_BLOCK_RE.search(reply)
+        if not match or not match.group(1).strip():
+            return
+        self.notify("The tutor is inspecting your kernel...")
+        result = await asyncio.to_thread(kernel.run_code, match.group(1).strip())
+        output = (result.stdout + result.stderr).strip() or "(no output)"
+        message = (
+            "[auto] Your check ran in my kernel. Output:\n"
+            f"```\n{output[:CHECK_OUTPUT_LIMIT]}\n```"
+        )
+        history = progress.get_history(self.current_lesson_id)
+        progress.append_history(self.current_lesson_id, "user", message)
+        self.chat_buffer += f"\n\n---\n\n**You**:\n\n{message}\n"
+        chat_log = self.query_one("#chat-log", Markdown)
+        await chat_log.update(self.chat_buffer)
+        self._scroll_chat_to_end()
+        await self.stream_tutor_reply(lesson, history, message, allow_check=False)
 
     def _maybe_record_quiz_score(self, reply: str) -> None:
         match = QUIZ_SCORE_RE.search(reply)

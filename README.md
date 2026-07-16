@@ -76,6 +76,13 @@ starting the app.
   get the run reviewed. Matplotlib figures are saved to `data/plots/`
   (the "Plots" button opens the folder in your image viewer). A Stop
   button cancels a slow tutor reply.
+- The tutor interacts with your environment: questions you type
+  automatically include your editor code (when it changed since the tutor
+  last saw it), and the tutor can run a small inspection snippet in your
+  live kernel — checking shapes, dtypes, or asserting on your variables —
+  with the output fed back to it automatically, so "verify my solution"
+  is checked against reality rather than guessed at. One check per
+  message, always visible in the chat.
 - Your editor code is saved per lesson and restored when you come back.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
   The app reopens on whatever lesson you had open last session, and

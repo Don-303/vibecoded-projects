@@ -292,3 +292,65 @@ def test_ctrl_d_jumps_to_review_due():
                 assert app.current_lesson_id == "py-numpy"
 
     asyncio.run(scenario())
+
+
+def test_editor_code_attached_once_to_typed_questions():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.5)
+                app.query_one("#code-editor", TextArea).text = "z = 7"
+                await app.send_to_tutor("why is my code wrong?", attach_editor=True)
+                await pilot.pause(0.5)
+                turns = [t for t in progress.get_history("py-core") if t["role"] == "user"]
+                assert "My current editor code" in turns[-1]["content"]
+                assert "z = 7" in turns[-1]["content"]
+                # unchanged editor -> not re-attached
+                await app.send_to_tutor("and now?", attach_editor=True)
+                await pilot.pause(0.5)
+                turns = [t for t in progress.get_history("py-core") if t["role"] == "user"]
+                assert "My current editor code" not in turns[-1]["content"]
+
+    asyncio.run(scenario())
+
+
+def test_tutor_check_runs_in_kernel_once():
+    calls = {"n": 0}
+    ran: list[str] = []
+
+    async def checking_stream(lesson, history, user_message, skill_name=None):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            # reply to the student's message asks for a kernel check
+            yield "Let me verify.\n```check\nprint(1 + 1)\n```"
+        else:
+            yield "All good."
+
+    def fake_run(code, on_output=None):
+        ran.append(code)
+        return kernel.RunResult(stdout="2\n", stderr="", timed_out=False, returncode=0)
+
+    async def scenario():
+        with _mocked_model(stream=checking_stream), patch.object(kernel, "run_code", fake_run):
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.5)
+                await app.send_to_tutor("check my work")
+                for _ in range(50):
+                    await pilot.pause(0.1)
+                    if calls["n"] >= 3:
+                        break
+                await pilot.pause(0.3)
+                assert ran == ["print(1 + 1)"]
+                history = progress.get_history("py-core")
+                auto = [t for t in history if t["content"].startswith("[auto]")]
+                assert len(auto) == 1
+                assert "2" in auto[0]["content"]
+                # the follow-up reply exists and no further check ran
+                assert history[-1]["role"] == "assistant"
+                assert calls["n"] == 3
+
+    asyncio.run(scenario())
