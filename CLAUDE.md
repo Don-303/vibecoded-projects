@@ -121,7 +121,7 @@ the user-facing explanation. Implementation notes:
 
 ## Curriculum order
 
-10 modules, 65 lessons, covering the full breadth of what a quantitative
+11 modules, 78 lessons, covering the full breadth of what a quantitative
 analyst needs. Several modules were shaped directly off real MSc Financial
 Engineering coursework (CE889 Neural Networks, CE802 Machine Learning,
 CF969 Machine Learning in Finance — see

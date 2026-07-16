@@ -5,6 +5,10 @@ numpy
 scikit-learn
 statsmodels
 arch
+cvxpy
+quantstats
+# CPU-only wheel; install with: pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch
 matplotlib
 rich
 pyyaml

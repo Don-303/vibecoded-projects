@@ -13,6 +13,9 @@ dependencies = [
     "scikit-learn",
     "statsmodels",
     "arch",
+    "cvxpy",
+    "quantstats",
+    "torch",
     "rich",
     "pyyaml",
 ]

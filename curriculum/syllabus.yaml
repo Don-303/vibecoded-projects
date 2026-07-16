@@ -111,6 +111,8 @@ modules:
         title: "Differentiation basics and gradient descent"
       - id: nn-perceptron
         title: "The perceptron and the XOR problem"
+      - id: nn-pytorch
+        title: "PyTorch fundamentals: tensors, autograd, and training with nn.Module"
       - id: nn-mlp-backprop
         title: "Multi-layer perceptrons and backpropagation"
         sources:
@@ -178,6 +180,8 @@ modules:
         title: "Portfolio construction models: equal-weight, mean-variance, risk parity, Black-Litterman"
         sources:
           - {repo: quantrocket-lectures, file: Lecture35-Risk-Constrained-Portfolio-Optimization.ipynb}
+      - id: fin-cvxpy
+        title: "Portfolio optimization in practice with cvxpy: objectives, constraints, the efficient frontier"
       - id: fin-hedging
         title: "Hedging strategies: why and how to hedge, beta hedging"
         sources:
@@ -240,6 +244,8 @@ modules:
           - {repo: quantrocket-lectures, file: Lecture28-Market-Impact-Models.ipynb}
       - id: eng-backtest-discipline
         title: "Backtesting discipline: survivorship bias, overfitting, realistic costs"
+      - id: eng-quantstats
+        title: "Strategy performance analysis with quantstats: Sharpe, drawdowns, tearsheets"
       - id: eng-reproducibility
         title: "Reproducibility, version control, and production deployment awareness"
 

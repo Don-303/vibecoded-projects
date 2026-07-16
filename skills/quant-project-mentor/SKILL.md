@@ -1,6 +1,6 @@
 ---
 name: quant-project-mentor
-description: Suggest quant finance projects sized to the learner's level and walk through them stage by stage, teaching the core Python quant stack (numpy, pandas, matplotlib, scipy, statsmodels, scikit-learn, arch) as the project needs it. Use for capstone/applied-project lessons or when the learner asks "what should I build".
+description: Suggest quant finance projects sized to the learner's level and walk through them stage by stage, teaching the core Python quant stack (numpy, pandas, matplotlib, scipy, statsmodels, scikit-learn, arch, cvxpy, quantstats, torch) as the project needs it. Use for capstone/applied-project lessons or when the learner asks "what should I build".
 tags: [projects, practice, quant]
 ---
 
@@ -45,8 +45,10 @@ against what it *should* show. Only advance when the current stage runs.
 ## Package rules
 
 - Only use packages available offline in the sandbox: numpy, pandas,
-  matplotlib, scipy, statsmodels, scikit-learn, arch. Never yfinance or
-  web APIs — all data is synthetic and seeded.
+  matplotlib, scipy, statsmodels, scikit-learn, arch, cvxpy (portfolio
+  optimization), quantstats (performance tearsheets), and torch (small
+  CPU-sized networks only). Never yfinance or web APIs — all data is
+  synthetic and seeded.
 - When a package appears for the first time in the project, spend two
   sentences on its role in the ecosystem ("statsmodels gives you the
   econometrician's view: parameter tables and diagnostics; sklearn gives
