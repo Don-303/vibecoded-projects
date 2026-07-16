@@ -162,3 +162,45 @@ def test_style_selection_persists_per_lesson():
                 assert app.query_one("#style-select", Select).value == "socratic-tutor"
 
     asyncio.run(scenario())
+
+
+def test_quiz_score_line_is_recorded():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                app._maybe_record_quiz_score("Well done! Final score: 4/5")
+                assert progress.last_quiz_score("py-core")["correct"] == 4
+                # replies without a score line record nothing
+                app._maybe_record_quiz_score("Keep going, no score here.")
+                assert progress.last_quiz_score("py-core")["correct"] == 4
+
+    asyncio.run(scenario())
+
+
+def test_lesson_filter_narrows_tree():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                from textual.widgets import Input, Tree
+
+                tree = app.query_one("#curriculum-tree", Tree)
+                all_modules = len(tree.root.children)
+                app.query_one("#lesson-filter", Input).value = "garch"
+                await pilot.pause(0.3)
+                filtered = tree.root.children
+                assert 0 < len(filtered) < all_modules
+                assert all(n.is_expanded for n in filtered)
+                titles = [str(leaf.label) for n in filtered for leaf in n.children]
+                assert any("GARCH" in t for t in titles)
+                # clearing restores the full tree
+                app.query_one("#lesson-filter", Input).value = ""
+                await pilot.pause(0.3)
+                assert len(tree.root.children) == all_modules
+
+    asyncio.run(scenario())

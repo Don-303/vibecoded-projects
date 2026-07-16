@@ -21,6 +21,7 @@ def _load() -> dict:
     state.setdefault("completed_at", {})
     state.setdefault("reviewed_at", {})
     state.setdefault("teaching_skill", {})
+    state.setdefault("quiz_scores", {})
     return state
 
 
@@ -50,10 +51,17 @@ def mark_reviewed(lesson_id: str) -> None:
     _save(state)
 
 
+# Lessons whose last quiz scored below this come due for review sooner.
+WEAK_SCORE_RATIO = 0.6
+WEAK_REVIEW_INTERVAL_DAYS = 3
+
+
 def is_review_due(lesson_id: str) -> bool:
     """A completed lesson comes due for review REVIEW_INTERVAL_DAYS after it
-    was completed or last reviewed, whichever is later. Lessons completed
-    before dates were recorded never come due (no way to know how stale)."""
+    was completed or last reviewed, whichever is later -- or sooner
+    (WEAK_REVIEW_INTERVAL_DAYS) if the last quiz on it scored poorly.
+    Lessons completed before dates were recorded never come due (no way to
+    know how stale)."""
     state = _load()
     if lesson_id not in state["completed"]:
         return False
@@ -64,7 +72,35 @@ def is_review_due(lesson_id: str) -> bool:
     stamps = [date.fromisoformat(s) for s in stamps if s]
     if not stamps:
         return False
-    return (date.today() - max(stamps)).days >= REVIEW_INTERVAL_DAYS
+    interval = REVIEW_INTERVAL_DAYS
+    last = last_quiz_score(lesson_id)
+    if last and last["correct"] / last["total"] < WEAK_SCORE_RATIO:
+        interval = WEAK_REVIEW_INTERVAL_DAYS
+    return (date.today() - max(stamps)).days >= interval
+
+
+def record_quiz_score(lesson_id: str, correct: int, total: int) -> None:
+    if total <= 0 or correct < 0 or correct > total:
+        return
+    state = _load()
+    state["quiz_scores"].setdefault(lesson_id, []).append(
+        {"date": date.today().isoformat(), "correct": correct, "total": total}
+    )
+    _save(state)
+
+
+def last_quiz_score(lesson_id: str) -> dict | None:
+    scores = _load()["quiz_scores"].get(lesson_id, [])
+    return scores[-1] if scores else None
+
+
+def quiz_stats() -> tuple[int, float] | None:
+    """(number of quizzes taken, average score ratio) across all lessons."""
+    all_scores = [s for scores in _load()["quiz_scores"].values() for s in scores]
+    if not all_scores:
+        return None
+    avg = sum(s["correct"] / s["total"] for s in all_scores) / len(all_scores)
+    return len(all_scores), avg
 
 
 def mark_incomplete(lesson_id: str) -> None:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import subprocess
 import time
 
 from textual.app import App, ComposeResult
@@ -51,8 +52,13 @@ QUIZ_MESSAGE = (
     "and application problems), spreading difficulty roughly 30% easy / "
     "50% medium / 20% hard. Test mode: ONE question at a time, tagged with "
     "its sub-topic and difficulty -- wait for my answer, grade it with a "
-    "one-line explanation, then ask the next."
+    "one-line explanation, then ask the next. Ask 5 questions in total; "
+    "after grading the fifth, end your reply with a line in exactly this "
+    "format: Final score: N/5"
 )
+# Matches the score line the quiz is instructed to end with; recording is
+# best-effort (a reply without it simply records nothing).
+QUIZ_SCORE_RE = re.compile(r"Final score:\s*(\d+)\s*/\s*(\d+)", re.IGNORECASE)
 FLASHCARDS_MESSAGE = (
     "Make me a flashcard deck for this lesson: extract the 5-10 ideas most "
     "worth remembering from what we've covered. One fact per card; fronts "
@@ -80,14 +86,20 @@ PROJECT_MESSAGE = (
 
 
 class ModelPicker(ModalScreen[str]):
-    """Launch-time model chooser: the catalog with one-line descriptions and
-    install status. Enter selects; the previous session's model is
-    preselected, so Enter alone keeps your usual choice."""
+    """Model chooser: the catalog with one-line descriptions and install
+    status. Enter selects; the preselected entry is the current/last-used
+    model, so Enter alone keeps it. Escape dismisses with "" (caller decides
+    what that means: keep the preselection at launch, no-op mid-session)."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, installed: set[str], preselect: str) -> None:
         super().__init__()
         self._installed = installed
         self._preselect = preselect
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
 
     def compose(self) -> ComposeResult:
         options = []
@@ -120,6 +132,9 @@ class TutorApp(App):
     #sidebar {
         width: 42;
         border-right: solid $accent;
+    }
+    #lesson-filter {
+        margin: 0 1;
     }
     #header-row {
         height: auto;
@@ -193,6 +208,7 @@ class TutorApp(App):
         ("ctrl+n", "next_lesson", "Next lesson"),
         ("ctrl+b", "toggle_sidebar", "Sidebar"),
         ("ctrl+e", "toggle_code_panel", "Code panel"),
+        ("ctrl+t", "switch_model", "Model"),
     ]
 
     def __init__(self) -> None:
@@ -210,6 +226,7 @@ class TutorApp(App):
         yield Header(show_clock=True)
         with Horizontal():
             with Vertical(id="sidebar"):
+                yield Input(placeholder="Filter lessons...", id="lesson-filter")
                 yield Tree("Curriculum", id="curriculum-tree")
             with Vertical():
                 with Horizontal(id="header-row"):
@@ -294,6 +311,10 @@ class TutorApp(App):
                                         "Clear", id="clear-btn", compact=True,
                                         tooltip="Clear the editor and output pane",
                                     )
+                                    yield Button(
+                                        "Plots", id="plots-btn", compact=True,
+                                        tooltip="Open the folder of figures saved by your runs",
+                                    )
                                 yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
                         with VerticalScroll():
@@ -340,7 +361,7 @@ class TutorApp(App):
     async def _pick_model_and_start(self) -> None:
         installed = await agent.installed_models()
         preselect = progress.get_model() or agent.DEFAULT_MODEL
-        chosen = await self.push_screen_wait(ModelPicker(installed, preselect))
+        chosen = await self.push_screen_wait(ModelPicker(installed, preselect)) or preselect
         agent.set_model(chosen)
         progress.save_model(chosen)
         self.sub_title = f"offline ML-for-finance tutor · {chosen}"
@@ -376,6 +397,27 @@ class TutorApp(App):
         if nxt:
             self.load_lesson(nxt.id)
 
+    def action_switch_model(self) -> None:
+        self.run_worker(self._switch_model(), group="model-check", exclusive=True)
+
+    async def _switch_model(self) -> None:
+        installed = await agent.installed_models()
+        chosen = await self.push_screen_wait(ModelPicker(installed, agent.MODEL))
+        if not chosen or chosen == agent.MODEL:
+            return
+        agent.set_model(chosen)
+        progress.save_model(chosen)
+        self.sub_title = f"offline ML-for-finance tutor · {chosen}"
+        self.notify(f"Switched to {chosen} — loading it in the background...")
+        # Load the new model and prefill the current lesson's prompt so the
+        # next message doesn't pay cold-load + full prefill back to back.
+        await agent.warm_up()
+        lesson = curriculum.find_lesson(self.current_lesson_id)
+        if lesson:
+            self.run_worker(
+                self._prewarm_worker(lesson), group="prefix-warm", exclusive=True
+            )
+
     def action_toggle_sidebar(self) -> None:
         sidebar = self.query_one("#sidebar")
         sidebar.display = not sidebar.display
@@ -407,12 +449,22 @@ class TutorApp(App):
     def build_tree(self) -> None:
         tree = self.query_one("#curriculum-tree", Tree)
         tree.root.expand()
+        query = self.query_one("#lesson-filter", Input).value.lower().strip()
         for module in curriculum.load_modules():
-            # Collapse everything except the module being studied -- a fully
-            # expanded 10-module tree is mostly scrolling.
+            lessons = module.lessons
+            if query:
+                # A module-title match shows the whole module; otherwise
+                # only the matching lessons.
+                if query not in module.title.lower():
+                    lessons = [l for l in lessons if query in l.title.lower()]
+                if not lessons:
+                    continue
+            # Filtered results are all expanded; otherwise collapse
+            # everything except the module being studied -- a fully expanded
+            # 11-module tree is mostly scrolling.
             is_current = any(l.id == self.current_lesson_id for l in module.lessons)
-            module_node = tree.root.add(module.title, expand=is_current)
-            for lesson in module.lessons:
+            module_node = tree.root.add(module.title, expand=bool(query) or is_current)
+            for lesson in lessons:
                 if progress.is_review_due(lesson.id):
                     mark = "↻ "
                 elif progress.is_complete(lesson.id):
@@ -420,6 +472,10 @@ class TutorApp(App):
                 else:
                     mark = "  "
                 module_node.add_leaf(f"{mark}{lesson.title}", data=lesson.id)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "lesson-filter":
+            self.refresh_tree()
 
     def refresh_tree(self) -> None:
         tree = self.query_one("#curriculum-tree", Tree)
@@ -585,6 +641,17 @@ class TutorApp(App):
         await chat_log.update(self.chat_buffer)
         self._scroll_chat_to_end()
         progress.append_history(self.current_lesson_id, "assistant", reply_so_far)
+        self._maybe_record_quiz_score(reply_so_far)
+
+    def _maybe_record_quiz_score(self, reply: str) -> None:
+        match = QUIZ_SCORE_RE.search(reply)
+        if not match:
+            return
+        correct, total = int(match.group(1)), int(match.group(2))
+        progress.record_quiz_score(self.current_lesson_id, correct, total)
+        self.refresh_progress_view()
+        self.refresh_tree()  # a weak score can change the review-due glyph
+        self.notify(f"Quiz score recorded: {correct}/{total}")
 
     def _scroll_chat_to_end(self) -> None:
         self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
@@ -626,13 +693,19 @@ class TutorApp(App):
             f"- Current streak: {progress.current_streak()} day(s)",
             f"- Longest streak: {progress.longest_streak()} day(s)",
         ]
+        stats = progress.quiz_stats()
+        if stats:
+            count, avg = stats
+            lines.append(f"- Quizzes taken: {count} (average score {int(avg * 100)}%)")
 
         due = [l for m in modules for l in m.lessons if progress.is_review_due(l.id)]
         if due:
             lines.append("")
             lines.append(f"## Review due ({len(due)}) — use \"Quiz me\" to refresh")
             for l in due:
-                lines.append(f"- ↻ {l.module_title}: {l.title}")
+                last = progress.last_quiz_score(l.id)
+                note = f" (last quiz {last['correct']}/{last['total']})" if last else ""
+                lines.append(f"- ↻ {l.module_title}: {l.title}{note}")
 
         remaining = [l for m in modules for l in m.lessons if not progress.is_complete(l.id)]
         if remaining:
@@ -697,6 +770,19 @@ class TutorApp(App):
             self.query_one("#code-editor", TextArea).text = ""
             self.query_one("#code-output", RichLog).clear()
             self.last_run_result = None
+        elif event.button.id == "plots-btn":
+            if sandbox.PLOTS_DIR.is_dir() and any(sandbox.PLOTS_DIR.iterdir()):
+                subprocess.Popen(
+                    ["xdg-open", str(sandbox.PLOTS_DIR)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self.notify("Opening the plots folder...")
+            else:
+                self.notify(
+                    "No plots saved yet — run code that draws a matplotlib figure.",
+                    severity="warning",
+                )
 
     def action_stop_generation(self) -> None:
         """Cancel an in-flight tutor reply. Nothing is persisted for the

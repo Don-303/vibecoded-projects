@@ -36,7 +36,10 @@ starting the app.
 - Pick a lesson from the tree on the left (curriculum runs Python/NumPy/
   Pandas → statistics → ML foundations → econometrics → ML-for-finance →
   capstone projects). Modules collapse/expand; only the one you're studying
-  starts open. Ctrl+B hides the sidebar entirely.
+  starts open. The filter box above the tree narrows it as you type
+  (try "garch"). Ctrl+B hides the sidebar entirely.
+- Ctrl+T switches the model mid-session (same picker as at launch; the
+  new model is warmed and the lesson prompt prefilled in the background).
 - The workspace shows the tutor chat and the code editor side by side
   (Ctrl+E hides/shows the editor pane). Opening a fresh lesson auto-starts
   it: the tutor introduces the concept and gives you an exercise.
@@ -66,15 +69,19 @@ starting the app.
   analogy → worked example → check). The choice is remembered per lesson.
 - Run code with Ctrl+R (or the Run button), then "Send output to tutor" to
   get it reviewed. Matplotlib figures are saved to `data/plots/` (the path
-  is printed in the output pane). A Stop button cancels a slow reply.
+  is printed in the output pane; the "Plots" button opens the folder in
+  your image viewer). A Stop button cancels a slow reply.
 - Your editor code is saved per lesson and restored when you come back.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
 - The "Progress" tab shows overall/per-module completion, total time spent,
   and your current/longest day streak. A live session timer sits next to
   the lesson header.
-- Spaced repetition: a week after you complete a lesson it comes due for
-  review (↻ in the tree and a "Review due" list in Progress); hitting
-  "Quiz me" on it counts as a review and resets the clock.
+- Spaced repetition with mastery tracking: a week after you complete a
+  lesson it comes due for review (↻ in the tree and a "Review due" list in
+  Progress); hitting "Quiz me" on it counts as a review and resets the
+  clock. Quizzes end with a score line the app records — score under 60%
+  and the lesson comes back for review in 3 days instead of 7. The
+  Progress tab shows quizzes taken and your average score.
 
 Progress, time spent per lesson, activity streaks, saved code, and chat
 history are stored locally in `data/progress.json` (not committed to git).

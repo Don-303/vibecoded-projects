@@ -86,7 +86,10 @@ to the local instance regardless of that env var.
   for light/dark fallback). Polled every 3s off-thread from `main.py`;
   only a detection *change* re-applies, so manual palette picks stick.
 - `app/progress.py` — JSON-backed persistence (`data/progress.json`,
-  gitignored) for lesson completion + per-lesson chat history.
+  gitignored) for lesson completion + per-lesson chat history. Also quiz
+  scores (`quiz_scores`): QUIZ_MESSAGE instructs a final "Final score:
+  N/5" line, `main.QUIZ_SCORE_RE` captures it best-effort, and a last
+  score < 60% shortens that lesson's review interval from 7 to 3 days.
 - `app/main.py` — the Textual TUI: sidebar lesson tree, chat tab, code
   editor tab with run/send-to-tutor.
 
