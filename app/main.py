@@ -340,6 +340,14 @@ class TutorApp(App):
         ("f1", "show_help", "Help"),
     ]
 
+    @property
+    def main_screen(self):
+        """The base screen all TutorApp widgets live on. App.query_one
+        searches the *active* screen, so timers/workers firing while a
+        modal (picker/help/confirm) is open would raise NoMatches -- every
+        widget lookup in this class goes through here instead."""
+        return self.screen_stack[0]
+
     def __init__(self) -> None:
         super().__init__()
         # Resume where the student left off last session.
@@ -475,9 +483,9 @@ class TutorApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#chat-panel").border_title = "Tutor"
-        self.query_one("#code-panel").border_title = "IPython editor"
-        self.query_one("#code-output", RichLog).border_title = "Output"
+        self.main_screen.query_one("#chat-panel").border_title = "Tutor"
+        self.main_screen.query_one("#code-panel").border_title = "IPython editor"
+        self.main_screen.query_one("#code-output", RichLog).border_title = "Output"
         # Start the kernel while the user picks a model/lesson, so the
         # first Run doesn't pay the kernel's cold start.
         self.run_worker(self._warm_kernel(), group="kernel-warm")
@@ -512,7 +520,7 @@ class TutorApp(App):
         progress.save_model(chosen)
         self.sub_title = f"v{__version__} · {chosen}"
         self.load_lesson(self.current_lesson_id)
-        self.query_one("#chat-input", Input).focus()
+        self.main_screen.query_one("#chat-input", Input).focus()
         if not rag.EMBEDDINGS_PATH.exists():
             self.notify(
                 "Lecture corpus index not found — the tutor will rely on the "
@@ -527,7 +535,8 @@ class TutorApp(App):
         elapsed = int(time.monotonic() - self.session_start)
         h, rem = divmod(elapsed, 3600)
         m, s = divmod(rem, 60)
-        self.query_one("#session-timer", Static).update(f"Session: {h:02d}:{m:02d}:{s:02d}")
+        timer = self.main_screen.query_one("#session-timer", Static)
+        timer.update(f"Session: {h:02d}:{m:02d}:{s:02d}")
         # Checkpoint tracked time and editor code every minute so closing the
         # terminal abruptly (instead of ctrl+q) loses at most a minute.
         if elapsed and elapsed % 60 == 0:
@@ -547,7 +556,8 @@ class TutorApp(App):
 
     def _save_editor_code(self) -> None:
         if self._code_loaded_for is not None:
-            progress.save_code(self._code_loaded_for, self.query_one("#code-editor", TextArea).text)
+            editor = self.main_screen.query_one("#code-editor", TextArea)
+            progress.save_code(self._code_loaded_for, editor.text)
 
     def action_run_code(self) -> None:
         self.run_code()
@@ -595,11 +605,11 @@ class TutorApp(App):
             )
 
     def action_toggle_sidebar(self) -> None:
-        sidebar = self.query_one("#sidebar")
+        sidebar = self.main_screen.query_one("#sidebar")
         sidebar.display = not sidebar.display
 
     def action_toggle_code_panel(self) -> None:
-        panel = self.query_one("#code-panel")
+        panel = self.main_screen.query_one("#code-panel")
         panel.display = not panel.display
 
     def _flush_lesson_time(self, restart: bool = False) -> None:
@@ -623,9 +633,9 @@ class TutorApp(App):
         await agent.warm_up()
 
     def build_tree(self) -> None:
-        tree = self.query_one("#curriculum-tree", Tree)
+        tree = self.main_screen.query_one("#curriculum-tree", Tree)
         tree.root.expand()
-        query = self.query_one("#lesson-filter", Input).value.lower().strip()
+        query = self.main_screen.query_one("#lesson-filter", Input).value.lower().strip()
         for module in curriculum.load_modules():
             lessons = module.lessons
             if query:
@@ -654,7 +664,7 @@ class TutorApp(App):
             self.refresh_tree()
 
     def refresh_tree(self) -> None:
-        tree = self.query_one("#curriculum-tree", Tree)
+        tree = self.main_screen.query_one("#curriculum-tree", Tree)
         tree.root.remove_children()
         self.build_tree()
 
@@ -672,7 +682,7 @@ class TutorApp(App):
         self.current_lesson_id = lesson_id
         progress.save_last_lesson(lesson_id)
         self.lesson_start = time.monotonic()
-        self.query_one("#code-editor", TextArea).text = progress.get_code(lesson_id)
+        self.main_screen.query_one("#code-editor", TextArea).text = progress.get_code(lesson_id)
         self._code_loaded_for = lesson_id
         if progress.is_review_due(lesson_id):
             status = "↻ review due"
@@ -680,19 +690,19 @@ class TutorApp(App):
             status = "✓ done"
         else:
             status = "○ in progress"
-        header = self.query_one("#lesson-header", Static)
+        header = self.main_screen.query_one("#lesson-header", Static)
         header.update(f"[b]{lesson.module_title}[/b] › {lesson.title}  [dim]{status}[/dim]")
 
         # Reflect this lesson's saved tutor style without treating the
         # programmatic update as a user change.
-        style_select = self.query_one("#style-select", Select)
+        style_select = self.main_screen.query_one("#style-select", Select)
         with style_select.prevent(Select.Changed):
             style_select.value = progress.get_teaching_skill(lesson_id) or "standard"
 
         history = progress.get_history(lesson_id)
         self.chat_buffer = self._render_history(history)
-        chat_log = self.query_one("#chat-log", Markdown)
-        self.query_one("#code-output", RichLog).clear()
+        chat_log = self.main_screen.query_one("#chat-log", Markdown)
+        self.main_screen.query_one("#code-output", RichLog).clear()
         if history:
             chat_log.update(self.chat_buffer)
             # Prefill the model's prompt cache for this lesson in the
@@ -733,7 +743,7 @@ class TutorApp(App):
     def _with_editor_attached(self, message: str) -> str:
         """Append the editor code to a typed question if it changed since the
         tutor last saw it, so "why is my code wrong?" just works."""
-        code = self.query_one("#code-editor", TextArea).text.strip()
+        code = self.main_screen.query_one("#code-editor", TextArea).text.strip()
         if not code or code == self._attached_code.get(self.current_lesson_id):
             return message
         self._attached_code[self.current_lesson_id] = code
@@ -748,7 +758,7 @@ class TutorApp(App):
         history = progress.get_history(self.current_lesson_id)
         progress.append_history(self.current_lesson_id, "user", message)
         self.chat_buffer += f"\n\n---\n\n**You**:\n\n{message}\n"
-        chat_log = self.query_one("#chat-log", Markdown)
+        chat_log = self.main_screen.query_one("#chat-log", Markdown)
         await chat_log.update(self.chat_buffer)
         self._scroll_chat_to_end()
         self.run_worker(
@@ -792,7 +802,7 @@ class TutorApp(App):
         separator = "\n\n---\n\n" if self.chat_buffer else ""
         self.chat_buffer += f"{separator}**Tutor**:\n\n"
         reply_so_far = ""
-        chat_log = self.query_one("#chat-log", Markdown)
+        chat_log = self.main_screen.query_one("#chat-log", Markdown)
         # The wait for the first token (prompt prefill) can be long on CPU --
         # tick the elapsed time so it reads as loading, not frozen. The reply
         # itself streams in token by token below.
@@ -863,7 +873,7 @@ class TutorApp(App):
         history = progress.get_history(self.current_lesson_id)
         progress.append_history(self.current_lesson_id, "user", message)
         self.chat_buffer += f"\n\n---\n\n**You**:\n\n{message}\n"
-        chat_log = self.query_one("#chat-log", Markdown)
+        chat_log = self.main_screen.query_one("#chat-log", Markdown)
         await chat_log.update(self.chat_buffer)
         self._scroll_chat_to_end()
         await self.stream_tutor_reply(lesson, history, message, allow_check=False)
@@ -889,14 +899,15 @@ class TutorApp(App):
                 await chat_log.update(self.chat_buffer + f"_Thinking... {elapsed}s_")
 
     def _scroll_chat_to_end(self) -> None:
-        self.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
+        self.main_screen.query_one("#chat-scroll", VerticalScroll).scroll_end(animate=False)
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         if event.pane.id == "tab-progress":
             self.refresh_progress_view()
 
     def refresh_progress_view(self) -> None:
-        self.query_one("#progress-view", Markdown).update(self._render_progress_markdown())
+        view = self.main_screen.query_one("#progress-view", Markdown)
+        view.update(self._render_progress_markdown())
 
     @staticmethod
     def _render_progress_markdown() -> str:
@@ -1009,16 +1020,16 @@ class TutorApp(App):
         elif event.button.id == "stop-btn":
             self.action_stop_generation()
         elif event.button.id == "copy-btn":
-            self.copy_to_clipboard(self.query_one("#code-editor", TextArea).text)
+            self.copy_to_clipboard(self.main_screen.query_one("#code-editor", TextArea).text)
             self.notify("Editor contents copied to clipboard.")
         elif event.button.id == "clear-btn":
-            self.query_one("#code-editor", TextArea).text = ""
-            self.query_one("#code-output", RichLog).clear()
+            self.main_screen.query_one("#code-editor", TextArea).text = ""
+            self.main_screen.query_one("#code-output", RichLog).clear()
             self.last_run_result = None
         elif event.button.id == "restart-kernel-btn":
             self.notify("Restarting the IPython kernel...")
             await asyncio.to_thread(kernel.restart)
-            self.query_one("#code-output", RichLog).clear()
+            self.main_screen.query_one("#code-output", RichLog).clear()
             self.notify("Kernel restarted — all variables cleared.")
         elif event.button.id == "plots-btn":
             if kernel.PLOTS_DIR.is_dir() and any(kernel.PLOTS_DIR.iterdir()):
@@ -1040,7 +1051,7 @@ class TutorApp(App):
         cancelled = self.workers.cancel_group(self, "tutor-stream")
         if cancelled:
             self.chat_buffer += "_[generation stopped]_"
-            self.query_one("#chat-log", Markdown).update(self.chat_buffer)
+            self.main_screen.query_one("#chat-log", Markdown).update(self.chat_buffer)
             self._scroll_chat_to_end()
 
     def copy_last_code_to_editor(self) -> None:
@@ -1051,10 +1062,10 @@ class TutorApp(App):
                 continue
             blocks = re.findall(r"```(?:python|py)?\n(.*?)```", turn["content"], re.DOTALL)
             if blocks:
-                editor = self.query_one("#code-editor", TextArea)
+                editor = self.main_screen.query_one("#code-editor", TextArea)
                 editor.text = blocks[-1].strip() + "\n"
-                self.query_one(TabbedContent).active = "tab-work"
-                self.query_one("#code-panel").display = True
+                self.main_screen.query_one(TabbedContent).active = "tab-work"
+                self.main_screen.query_one("#code-panel").display = True
                 editor.focus()
                 self.notify("Code copied to editor — Ctrl+R to run.")
                 return
@@ -1064,12 +1075,12 @@ class TutorApp(App):
         self.run_worker(self._run_code_worker(), exclusive=True, group="run-code")
 
     async def _run_code_worker(self) -> None:
-        editor = self.query_one("#code-editor", TextArea)
+        editor = self.main_screen.query_one("#code-editor", TextArea)
         # IPython-style incremental work: a selection runs alone against the
         # kernel's persistent namespace; no selection runs the whole buffer.
         code = editor.selected_text or editor.text
-        output_log = self.query_one("#code-output", RichLog)
-        run_btn = self.query_one("#run-btn", Button)
+        output_log = self.main_screen.query_one("#code-output", RichLog)
+        run_btn = self.main_screen.query_one("#run-btn", Button)
         output_log.clear()
         run_btn.disabled = True
 
@@ -1104,7 +1115,7 @@ class TutorApp(App):
         output_log.write(f"[dim][{status} in {time.monotonic() - started:.1f}s][/dim]")
 
     async def send_code_output_to_tutor(self) -> None:
-        code = self.query_one("#code-editor", TextArea).text
+        code = self.main_screen.query_one("#code-editor", TextArea).text
         result = self.last_run_result
         if result is None:
             output_text = "(code has not been run yet)"
@@ -1112,7 +1123,7 @@ class TutorApp(App):
             output_text = "\n".join(p for p in (result.stdout, result.stderr) if p).strip()
             output_text = output_text or "(no output)"
         message = f"Here is my code:\n```python\n{code}\n```\n\nOutput:\n```\n{output_text}\n```"
-        self.query_one(TabbedContent).active = "tab-work"
+        self.main_screen.query_one(TabbedContent).active = "tab-work"
         await self.send_to_tutor(message)
 
 
