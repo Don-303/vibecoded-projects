@@ -37,13 +37,16 @@ def load_modules() -> list[Module]:
     for m in raw["modules"]:
         lessons = [
             Lesson(
-                id=l["id"],
-                title=l["title"],
+                id=raw_lesson["id"],
+                title=raw_lesson["title"],
                 module_id=m["id"],
                 module_title=m["title"],
-                sources=[SourceRef(repo=s["repo"], file=s["file"]) for s in l.get("sources", [])],
+                sources=[
+                    SourceRef(repo=s["repo"], file=s["file"])
+                    for s in raw_lesson.get("sources", [])
+                ],
             )
-            for l in m["lessons"]
+            for raw_lesson in m["lessons"]
         ]
         modules.append(Module(id=m["id"], title=m["title"], lessons=lessons))
     return modules
@@ -62,7 +65,7 @@ def find_lesson(lesson_id: str) -> Lesson | None:
 
 def next_lesson(lesson_id: str) -> Lesson | None:
     lessons = all_lessons()
-    ids = [l.id for l in lessons]
+    ids = [lesson.id for lesson in lessons]
     if lesson_id not in ids:
         return None
     idx = ids.index(lesson_id)

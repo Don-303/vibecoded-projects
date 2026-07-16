@@ -1,6 +1,7 @@
 """Wraps a local Ollama model as an interactive tutor."""
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator
 
 from ollama import AsyncClient
@@ -305,10 +306,9 @@ async def stream_reply(
 async def warm_up() -> None:
     """Load the chat model into memory without generating anything, so the
     first real message doesn't pay the ~1-2 min cold-load on this machine."""
-    try:
+    # Failures are ignored: check_model_available() surfaces real problems.
+    with contextlib.suppress(Exception):
         await _client.chat(model=MODEL, messages=[], keep_alive=KEEP_ALIVE)
-    except Exception:
-        pass  # check_model_available() surfaces real problems to the user
 
 
 async def prewarm(lesson: Lesson, history: list[dict], skill_name: str | None = None) -> None:
@@ -321,15 +321,14 @@ async def prewarm(lesson: Lesson, history: list[dict], skill_name: str | None = 
         {"role": "system", "content": system_prompt(lesson, extra_block, skill_name)}
     ]
     messages.extend(_fit_history(history))
-    try:
+    # Best-effort: on failure the real message just pays the prefill.
+    with contextlib.suppress(Exception):
         await _client.chat(
             model=MODEL,
             messages=messages,
             options={"num_ctx": NUM_CTX, "num_thread": NUM_THREAD, "num_predict": 1},
             keep_alive=KEEP_ALIVE,
         )
-    except Exception:
-        pass  # best-effort: the real message will just pay the prefill
 
 
 async def installed_models() -> set[str]:

@@ -9,10 +9,7 @@ DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "progress.json"
 
 
 def _load() -> dict:
-    if DATA_PATH.exists():
-        state = json.loads(DATA_PATH.read_text())
-    else:
-        state = {}
+    state = json.loads(DATA_PATH.read_text()) if DATA_PATH.exists() else {}
     state.setdefault("completed", [])
     state.setdefault("history", {})
     state.setdefault("time_spent", {})
@@ -105,7 +102,7 @@ def quiz_stats() -> tuple[int, float] | None:
 
 def mark_incomplete(lesson_id: str) -> None:
     state = _load()
-    state["completed"] = [l for l in state["completed"] if l != lesson_id]
+    state["completed"] = [c for c in state["completed"] if c != lesson_id]
     _save(state)
 
 
@@ -200,7 +197,7 @@ def longest_streak() -> int:
     if not dates:
         return 0
     longest = current = 1
-    for prev, curr in zip(dates, dates[1:]):
+    for prev, curr in zip(dates, dates[1:], strict=False):
         if (curr - prev).days == 1:
             current += 1
         else:

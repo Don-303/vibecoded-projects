@@ -49,7 +49,9 @@ def run_code(code: str) -> RunResult:
             timeout=TIMEOUT_SECONDS,
             env=env,
         )
-        return RunResult(stdout=proc.stdout, stderr=proc.stderr, timed_out=False, returncode=proc.returncode)
+        return RunResult(
+            stdout=proc.stdout, stderr=proc.stderr, timed_out=False, returncode=proc.returncode
+        )
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
         stderr = exc.stderr or ""

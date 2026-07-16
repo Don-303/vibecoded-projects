@@ -30,9 +30,45 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 
-from app import agent, curriculum, progress, sandbox, theming
+from app import __version__, agent, curriculum, progress, rag, sandbox, theming
 
 DEFAULT_LESSON_ID = "py-core"
+
+HELP_TEXT = f"""\
+# Quant Tutor v{__version__}
+
+## Keyboard shortcuts
+| Key | Action |
+| --- | --- |
+| Ctrl+R | Run the code in the editor |
+| Ctrl+N | Next lesson |
+| Ctrl+B | Show/hide the curriculum sidebar |
+| Ctrl+E | Show/hide the code editor panel |
+| Ctrl+T | Switch model (Escape cancels) |
+| F1 | This help |
+| Ctrl+Q | Quit |
+
+## Chat actions
+- **Quiz me** — 5 questions, one at a time, graded as you go. The final
+  score is recorded; scoring under 60% brings the lesson back for review
+  in 3 days instead of 7.
+- **Practice** — skeleton code with TODOs to fill in.
+- **Example** — a complete runnable worked example.
+- **Cards** — a flashcard deck (Q/A + cloze) from the lesson.
+- **Recap** — key takeaways so far, and what's left.
+- **Project** — three suggested mini-projects; pick one and it's walked
+  through in stages (data → exploration → model → evaluation → report).
+- **Code → editor** — copy the tutor's last code block into the editor.
+
+## Workflow
+Pick a lesson (filter box narrows the tree) — the tutor introduces it and
+sets an exercise. Write code in the editor, Ctrl+R to run, then "Send
+output to tutor" for review. Mark the lesson complete when it clicks;
+it returns for spaced review a week later (↻ in the tree).
+
+The tutor style selector (header) switches how it teaches this lesson:
+standard, Socratic questioning, or layered explanations.
+"""
 
 # Tutor styles: teaching-skill playbooks (skills/, from DeepTutor's EduHub)
 # the student can switch per lesson. "standard" = no extra skill.
@@ -124,6 +160,48 @@ class ModelPicker(ModalScreen[str]):
         self.dismiss(event.option.id)
 
 
+class HelpScreen(ModalScreen[None]):
+    """F1: shortcuts, chat actions, and the intended workflow."""
+
+    BINDINGS = [("escape", "dismiss_help", "Close")]
+
+    def action_dismiss_help(self) -> None:
+        self.dismiss()
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help-dialog"):
+            with VerticalScroll():
+                yield Markdown(HELP_TEXT)
+            yield Static("[dim]Escape to close[/dim]", id="help-hint")
+
+
+class ConfirmScreen(ModalScreen[bool]):
+    """A yes/no confirmation for destructive actions."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, message: str, confirm_label: str = "Yes") -> None:
+        super().__init__()
+        self._message = message
+        self._confirm_label = confirm_label
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="confirm-dialog"):
+            yield Static(self._message, id="confirm-message")
+            with Horizontal(id="confirm-actions"):
+                yield Button(self._confirm_label, id="confirm-yes", variant="error")
+                yield Button("Cancel", id="confirm-no")
+
+    def on_mount(self) -> None:
+        self.query_one("#confirm-no", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm-yes")
+
+
 class TutorApp(App):
     TITLE = "Quant Tutor"
     SUB_TITLE = "offline ML-for-finance tutor"
@@ -139,6 +217,12 @@ class TutorApp(App):
     #header-row {
         height: auto;
         background: $boost;
+    }
+    /* Fit the tab area to the screen: without this it grows to its
+       content and pushes #lesson-actions below the fold on shorter
+       terminals. */
+    TabbedContent {
+        height: 1fr;
     }
     #lesson-header {
         padding: 0 1;
@@ -160,10 +244,12 @@ class TutorApp(App):
     }
     #chat-panel {
         width: 1fr;
+        border-top: solid $accent;
     }
     #code-panel {
         width: 1fr;
         border-left: solid $accent;
+        border-top: solid $accent;
     }
     #chat-actions, #code-actions, #lesson-actions {
         height: auto;
@@ -182,8 +268,35 @@ class TutorApp(App):
         height: 10;
         border-top: solid $accent;
     }
-    ModelPicker {
+    ModelPicker, HelpScreen, ConfirmScreen {
         align: center middle;
+    }
+    #help-dialog {
+        width: 80;
+        height: 80%;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #help-hint {
+        padding: 0 1;
+        height: auto;
+    }
+    #confirm-dialog {
+        width: 60;
+        height: auto;
+        border: thick $error;
+        background: $surface;
+        padding: 1 2;
+    }
+    #confirm-message {
+        padding: 0 1 1 1;
+    }
+    #confirm-actions {
+        height: auto;
+    }
+    #confirm-actions Button {
+        margin-right: 2;
     }
     #model-dialog {
         width: 90;
@@ -209,6 +322,7 @@ class TutorApp(App):
         ("ctrl+b", "toggle_sidebar", "Sidebar"),
         ("ctrl+e", "toggle_code_panel", "Code panel"),
         ("ctrl+t", "switch_model", "Model"),
+        ("f1", "show_help", "Help"),
     ]
 
     def __init__(self) -> None:
@@ -254,7 +368,8 @@ class TutorApp(App):
                                 with Horizontal(id="chat-actions"):
                                     yield Button(
                                         "Quiz me", id="quiz-btn", compact=True,
-                                        tooltip="One-question-at-a-time quiz on this lesson (counts as a review)",
+                                        tooltip="One-question-at-a-time quiz on this "
+                                        "lesson (counts as a review)",
                                     )
                                     yield Button(
                                         "Practice", id="practice-btn", compact=True,
@@ -297,11 +412,13 @@ class TutorApp(App):
                                 with Horizontal(id="code-actions"):
                                     yield Button(
                                         "Run", id="run-btn", variant="primary", compact=True,
-                                        tooltip="Run the code (Ctrl+R); plots are saved to data/plots/",
+                                        tooltip="Run the code (Ctrl+R); plots are "
+                                        "saved to data/plots/",
                                     )
                                     yield Button(
                                         "Send output to tutor", id="send-btn", compact=True,
-                                        tooltip="Send your code and its output to the tutor for review",
+                                        tooltip="Send your code and its output to "
+                                        "the tutor for review",
                                     )
                                     yield Button(
                                         "Copy", id="copy-btn", compact=True,
@@ -335,6 +452,9 @@ class TutorApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#chat-panel").border_title = "Tutor"
+        self.query_one("#code-panel").border_title = "Code editor"
+        self.query_one("#code-output", RichLog).border_title = "Output"
         self.build_tree()
         self.refresh_progress_view()
         self.set_interval(1.0, self.update_session_timer)
@@ -364,9 +484,17 @@ class TutorApp(App):
         chosen = await self.push_screen_wait(ModelPicker(installed, preselect)) or preselect
         agent.set_model(chosen)
         progress.save_model(chosen)
-        self.sub_title = f"offline ML-for-finance tutor · {chosen}"
+        self.sub_title = f"v{__version__} · {chosen}"
         self.load_lesson(self.current_lesson_id)
         self.query_one("#chat-input", Input).focus()
+        if not rag.EMBEDDINGS_PATH.exists():
+            self.notify(
+                "Lecture corpus index not found — the tutor will rely on the "
+                "model's own knowledge. Run scripts/build_rag_index.py to "
+                "ground lessons in real lecture material.",
+                severity="warning",
+                timeout=12,
+            )
         await self.check_model()
 
     def update_session_timer(self) -> None:
@@ -397,6 +525,9 @@ class TutorApp(App):
         if nxt:
             self.load_lesson(nxt.id)
 
+    def action_show_help(self) -> None:
+        self.push_screen(HelpScreen())
+
     def action_switch_model(self) -> None:
         self.run_worker(self._switch_model(), group="model-check", exclusive=True)
 
@@ -407,7 +538,7 @@ class TutorApp(App):
             return
         agent.set_model(chosen)
         progress.save_model(chosen)
-        self.sub_title = f"offline ML-for-finance tutor · {chosen}"
+        self.sub_title = f"v{__version__} · {chosen}"
         self.notify(f"Switched to {chosen} — loading it in the background...")
         # Load the new model and prefill the current lesson's prompt so the
         # next message doesn't pay cold-load + full prefill back to back.
@@ -456,13 +587,13 @@ class TutorApp(App):
                 # A module-title match shows the whole module; otherwise
                 # only the matching lessons.
                 if query not in module.title.lower():
-                    lessons = [l for l in lessons if query in l.title.lower()]
+                    lessons = [le for le in lessons if query in le.title.lower()]
                 if not lessons:
                     continue
             # Filtered results are all expanded; otherwise collapse
             # everything except the module being studied -- a fully expanded
             # 11-module tree is mostly scrolling.
-            is_current = any(l.id == self.current_lesson_id for l in module.lessons)
+            is_current = any(le.id == self.current_lesson_id for le in module.lessons)
             module_node = tree.root.add(module.title, expand=bool(query) or is_current)
             for lesson in lessons:
                 if progress.is_review_due(lesson.id):
@@ -586,7 +717,7 @@ class TutorApp(App):
             self.run_worker(
                 self._prewarm_worker(lesson), group="prefix-warm", exclusive=True
             )
-        label = dict((v, l) for l, v in STYLE_OPTIONS).get(event.value, event.value)
+        label = {value: text for text, value in STYLE_OPTIONS}.get(event.value, event.value)
         self.notify(f"Tutor style for this lesson: {label.removeprefix('Style: ')}")
 
     async def _prewarm_worker(self, lesson) -> None:
@@ -626,7 +757,12 @@ class TutorApp(App):
                     await chat_log.update(self.chat_buffer + reply_so_far + " ▌")
                     self._scroll_chat_to_end()
         except Exception as exc:
-            reply_so_far = f"_Error talking to local model: {exc}_"
+            reply_so_far = (
+                f"_Error talking to local model: {exc}_\n\n"
+                "_Check that Ollama is running (`systemctl status ollama`) "
+                "and the model is installed — Ctrl+T to pick another model, "
+                "then resend your message._"
+            )
 
         self.chat_buffer += reply_so_far
         # Speed stats for the reply (each stream chunk is ~one token). Shown
@@ -667,7 +803,7 @@ class TutorApp(App):
     def _render_progress_markdown() -> str:
         modules = curriculum.load_modules()
         total = sum(len(m.lessons) for m in modules)
-        done = sum(1 for m in modules for l in m.lessons if progress.is_complete(l.id))
+        done = sum(1 for m in modules for le in m.lessons if progress.is_complete(le.id))
         pct = int(100 * done / total) if total else 0
         bar_len = 30
         filled = int(bar_len * done / total) if total else 0
@@ -680,7 +816,7 @@ class TutorApp(App):
             "## By module",
         ]
         for m in modules:
-            m_done = sum(1 for l in m.lessons if progress.is_complete(l.id))
+            m_done = sum(1 for le in m.lessons if progress.is_complete(le.id))
             lines.append(f"- **{m.title}**: {m_done}/{len(m.lessons)}")
 
         total_seconds = progress.total_time_spent()
@@ -698,21 +834,21 @@ class TutorApp(App):
             count, avg = stats
             lines.append(f"- Quizzes taken: {count} (average score {int(avg * 100)}%)")
 
-        due = [l for m in modules for l in m.lessons if progress.is_review_due(l.id)]
+        due = [le for m in modules for le in m.lessons if progress.is_review_due(le.id)]
         if due:
             lines.append("")
             lines.append(f"## Review due ({len(due)}) — use \"Quiz me\" to refresh")
-            for l in due:
-                last = progress.last_quiz_score(l.id)
+            for le in due:
+                last = progress.last_quiz_score(le.id)
                 note = f" (last quiz {last['correct']}/{last['total']})" if last else ""
-                lines.append(f"- ↻ {l.module_title}: {l.title}{note}")
+                lines.append(f"- ↻ {le.module_title}: {le.title}{note}")
 
-        remaining = [l for m in modules for l in m.lessons if not progress.is_complete(l.id)]
+        remaining = [le for m in modules for le in m.lessons if not progress.is_complete(le.id)]
         if remaining:
             lines.append("")
             lines.append(f"## Remaining lessons ({len(remaining)})")
-            for l in remaining:
-                lines.append(f"- {l.module_title}: {l.title}")
+            for le in remaining:
+                lines.append(f"- {le.module_title}: {le.title}")
         else:
             lines.append("\nAll lessons complete!")
 
@@ -733,9 +869,21 @@ class TutorApp(App):
             if nxt:
                 self.load_lesson(nxt.id)
         elif event.button.id == "reset-btn":
-            progress.clear_history(self.current_lesson_id)
-            self.load_lesson(self.current_lesson_id)
-            self.notify("Lesson conversation cleared.")
+
+            def _do_reset(confirmed: bool | None) -> None:
+                if confirmed:
+                    progress.clear_history(self.current_lesson_id)
+                    self.load_lesson(self.current_lesson_id)
+                    self.notify("Lesson conversation cleared.")
+
+            self.push_screen(
+                ConfirmScreen(
+                    "Clear this lesson's entire conversation history?\n"
+                    "Saved editor code and completion status are kept.",
+                    confirm_label="Clear it",
+                ),
+                _do_reset,
+            )
         elif event.button.id == "quiz-btn":
             if progress.is_complete(self.current_lesson_id):
                 progress.mark_reviewed(self.current_lesson_id)

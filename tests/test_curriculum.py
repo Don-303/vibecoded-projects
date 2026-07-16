@@ -10,7 +10,7 @@ def test_modules_load():
 
 
 def test_lesson_ids_unique():
-    ids = [l.id for l in curriculum.all_lessons()]
+    ids = [lesson.id for lesson in curriculum.all_lessons()]
     assert len(ids) == len(set(ids))
 
 
@@ -26,9 +26,9 @@ def test_find_and_next():
 @pytest.mark.skipif(not rag.CORPUS_DIR.exists(), reason="corpus not cloned")
 def test_all_sources_resolve():
     missing = [
-        (l.id, s.repo, s.file)
-        for l in curriculum.all_lessons()
-        for s in l.sources
+        (lesson.id, s.repo, s.file)
+        for lesson in curriculum.all_lessons()
+        for s in lesson.sources
         if rag.find_source_file(s.repo, s.file) is None
     ]
     assert not missing, f"syllabus references nonexistent corpus files: {missing}"

@@ -74,7 +74,8 @@ def main() -> None:
             title = title_from_path(nb_path)
             for chunk in chunk_notebook(nb_path):
                 new_chunks.append(
-                    {"text": chunk, "source_repo": name, "source_file": nb_path.name, "title": title}
+                    {"text": chunk, "source_repo": name,
+                     "source_file": nb_path.name, "title": title}
                 )
         print(f"[{name}] {len(new_chunks)} chunks to embed")
 

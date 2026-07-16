@@ -204,3 +204,54 @@ def test_lesson_filter_narrows_tree():
                 assert len(tree.root.children) == all_modules
 
     asyncio.run(scenario())
+
+
+def test_help_screen_opens_and_closes():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.2)
+                await pilot.press("f1")
+                await pilot.pause(0.2)
+                from app.main import HelpScreen
+
+                assert isinstance(app.screen, HelpScreen)
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+                assert not isinstance(app.screen, HelpScreen)
+
+    asyncio.run(scenario())
+
+
+def test_reset_requires_confirmation():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                for _ in range(50):
+                    await pilot.pause(0.1)
+                    if progress.get_history("py-core"):
+                        break
+                assert progress.get_history("py-core")
+
+                from app.main import ConfirmScreen
+
+                # cancelling keeps the history
+                await pilot.click("#reset-btn")
+                await pilot.pause(0.2)
+                assert isinstance(app.screen, ConfirmScreen)
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+                assert progress.get_history("py-core")
+
+                # confirming clears it
+                await pilot.click("#reset-btn")
+                await pilot.pause(0.2)
+                await pilot.click("#confirm-yes")
+                await pilot.pause(0.3)
+                assert not isinstance(app.screen, ConfirmScreen)
+
+    asyncio.run(scenario())

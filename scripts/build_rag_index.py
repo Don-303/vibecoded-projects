@@ -106,7 +106,8 @@ def main() -> None:
             title = title_from_path(file_path)
             for chunk in chunk_fn(file_path):
                 all_chunks.append(
-                    {"text": chunk, "source_repo": name, "source_file": file_path.name, "title": title}
+                    {"text": chunk, "source_repo": name,
+                     "source_file": file_path.name, "title": title}
                 )
 
     print(f"Total chunks: {len(all_chunks)}")

@@ -86,10 +86,13 @@ starting the app.
 Progress, time spent per lesson, activity streaks, saved code, and chat
 history are stored locally in `data/progress.json` (not committed to git).
 
-## Tests
+Press **F1** in the app for the full list of shortcuts and chat actions.
+
+## Development
 
 ```bash
-.venv/bin/pytest
+.venv/bin/pytest              # test suite
+.venv/bin/ruff check .        # lint (config in pyproject.toml)
 ```
 
 ## Teaching skills (DeepTutor EduHub)

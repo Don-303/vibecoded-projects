@@ -91,7 +91,13 @@ to the local instance regardless of that env var.
   N/5" line, `main.QUIZ_SCORE_RE` captures it best-effort, and a last
   score < 60% shortens that lesson's review interval from 7 to 3 days.
 - `app/main.py` — the Textual TUI: sidebar lesson tree, chat tab, code
-  editor tab with run/send-to-tutor.
+  editor tab with run/send-to-tutor. Modal screens: ModelPicker (launch +
+  Ctrl+T), HelpScreen (F1), ConfirmScreen (destructive actions). The
+  `TabbedContent { height: 1fr }` CSS rule is load-bearing: without it the
+  bottom action row overflows the screen on short terminals.
+- Project metadata, pytest config, and ruff lint config live in
+  `pyproject.toml` (version in `app/__init__.py`). `ruff check .` must
+  stay clean.
 
 ## Grounding the tutor in real lecture material
 
