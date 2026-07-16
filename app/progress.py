@@ -20,6 +20,7 @@ def _load() -> dict:
     state.setdefault("code", {})
     state.setdefault("completed_at", {})
     state.setdefault("reviewed_at", {})
+    state.setdefault("teaching_skill", {})
     return state
 
 
@@ -85,6 +86,19 @@ def append_history(lesson_id: str, role: str, content: str) -> None:
 def clear_history(lesson_id: str) -> None:
     state = _load()
     state["history"].pop(lesson_id, None)
+    _save(state)
+
+
+def get_teaching_skill(lesson_id: str) -> str | None:
+    return _load()["teaching_skill"].get(lesson_id)
+
+
+def save_teaching_skill(lesson_id: str, skill_name: str | None) -> None:
+    state = _load()
+    if skill_name:
+        state["teaching_skill"][lesson_id] = skill_name
+    else:
+        state["teaching_skill"].pop(lesson_id, None)
     _save(state)
 
 

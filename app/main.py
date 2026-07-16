@@ -1,7 +1,7 @@
 """Offline terminal tutor for ML in finance / econometrics / quant finance.
 
-Runs entirely locally via Ollama + Qwen2.5-7B-Instruct. No network required
-once the model is pulled.
+Runs entirely locally via Ollama (see agent.MODEL). No network required once
+the model is pulled.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from textual.widgets import (
     Input,
     Markdown,
     RichLog,
+    Select,
     Static,
     TabbedContent,
     TabPane,
@@ -28,6 +29,34 @@ from textual.widgets import (
 from app import agent, curriculum, progress, sandbox
 
 DEFAULT_LESSON_ID = "py-core"
+
+# Tutor styles: teaching-skill playbooks (skills/, from DeepTutor's EduHub)
+# the student can switch per lesson. "standard" = no extra skill.
+STYLE_OPTIONS = [
+    ("Style: standard", "standard"),
+    ("Style: Socratic", "socratic-tutor"),
+    ("Style: explainer", "concept-explainer"),
+]
+
+# Skill-derived action prompts. Sent as user messages so they extend the
+# prompt cache instead of invalidating the system prompt. Both are phrased
+# for one-reply-at-a-time interaction (num_predict bounds reply length).
+QUIZ_MESSAGE = (
+    "Quiz me on this lesson, exam-blueprint style: cover different "
+    "sub-topics of what we've studied, mix question types (multiple choice "
+    "with plausible distractors that reflect common mistakes, short answer, "
+    "and application problems), spreading difficulty roughly 30% easy / "
+    "50% medium / 20% hard. Test mode: ONE question at a time, tagged with "
+    "its sub-topic and difficulty -- wait for my answer, grade it with a "
+    "one-line explanation, then ask the next."
+)
+FLASHCARDS_MESSAGE = (
+    "Make me a flashcard deck for this lesson: extract the 5-10 ideas most "
+    "worth remembering from what we've covered. One fact per card; fronts "
+    "must force recall, not recognition (prefer why/how over what); mix Q/A "
+    "cards with cloze deletions, ordered easy to hard. Output a numbered "
+    "list of Q: / A: pairs I can drill."
+)
 
 
 class TutorApp(App):
@@ -51,6 +80,9 @@ class TutorApp(App):
         padding: 0 1;
         width: auto;
         color: $text-muted;
+    }
+    #style-select {
+        width: 24;
     }
     #progress-view {
         padding: 1;
@@ -111,6 +143,15 @@ class TutorApp(App):
             with Vertical():
                 with Horizontal(id="header-row"):
                     yield Static("", id="lesson-header")
+                    yield Select(
+                        STYLE_OPTIONS,
+                        value="standard",
+                        allow_blank=False,
+                        id="style-select",
+                        tooltip="How the tutor teaches this lesson: standard, "
+                        "Socratic (guides with questions), or explainer "
+                        "(layered concept explanations)",
+                    )
                     yield Static("Session: 00:00:00", id="session-timer")
                 with TabbedContent():
                     with TabPane("Workspace", id="tab-work"):
@@ -134,6 +175,10 @@ class TutorApp(App):
                                     yield Button(
                                         "Example", id="example-btn", compact=True,
                                         tooltip="Complete runnable worked example",
+                                    )
+                                    yield Button(
+                                        "Cards", id="flashcards-btn", compact=True,
+                                        tooltip="Flashcard deck (Q/A + cloze) from this lesson",
                                     )
                                     yield Button(
                                         "Code → editor", id="to-editor-btn", compact=True,
@@ -298,6 +343,12 @@ class TutorApp(App):
         header = self.query_one("#lesson-header", Static)
         header.update(f"[b]{lesson.module_title}[/b] › {lesson.title}  [dim]{status}[/dim]")
 
+        # Reflect this lesson's saved tutor style without treating the
+        # programmatic update as a user change.
+        style_select = self.query_one("#style-select", Select)
+        with style_select.prevent(Select.Changed):
+            style_select.value = progress.get_teaching_skill(lesson_id) or "standard"
+
         history = progress.get_history(lesson_id)
         self.chat_buffer = self._render_history(history)
         chat_log = self.query_one("#chat-log", Markdown)
@@ -355,12 +406,34 @@ class TutorApp(App):
             exclusive=True,
         )
 
+    def _current_skill(self) -> str | None:
+        return progress.get_teaching_skill(self.current_lesson_id)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id != "style-select":
+            return
+        skill_name = None if event.value == "standard" else str(event.value)
+        if skill_name == progress.get_teaching_skill(self.current_lesson_id):
+            return
+        progress.save_teaching_skill(self.current_lesson_id, skill_name)
+        lesson = curriculum.find_lesson(self.current_lesson_id)
+        if lesson:
+            # The style changes the system prompt, so the prompt cache for
+            # this lesson is stale -- prefill the new prefix in the background.
+            self.run_worker(
+                self._prewarm_worker(lesson), group="prefix-warm", exclusive=True
+            )
+        label = dict((v, l) for l, v in STYLE_OPTIONS).get(event.value, event.value)
+        self.notify(f"Tutor style for this lesson: {label.removeprefix('Style: ')}")
+
     async def _prewarm_worker(self, lesson) -> None:
         # Debounce: browsing quickly through lessons shouldn't queue a
         # prefill per click (exclusive=True cancels this sleep on the next
         # lesson switch, before any request is sent).
         await asyncio.sleep(1.5)
-        await agent.prewarm(lesson, progress.get_history(lesson.id))
+        await agent.prewarm(
+            lesson, progress.get_history(lesson.id), progress.get_teaching_skill(lesson.id)
+        )
 
     async def stream_tutor_reply(self, lesson, history: list[dict], user_message: str) -> None:
         separator = "\n\n---\n\n" if self.chat_buffer else ""
@@ -374,7 +447,9 @@ class TutorApp(App):
         # conversation and competes with Ollama for CPU; render at most ~4x/s.
         last_render = 0.0
         try:
-            async for token in agent.stream_reply(lesson, history, user_message):
+            async for token in agent.stream_reply(
+                lesson, history, user_message, self._current_skill()
+            ):
                 reply_so_far += token
                 now = time.monotonic()
                 if now - last_render >= 0.25:
@@ -470,10 +545,9 @@ class TutorApp(App):
             if progress.is_complete(self.current_lesson_id):
                 progress.mark_reviewed(self.current_lesson_id)
                 self.refresh_tree()
-            await self.send_to_tutor(
-                "Quiz me on what we've covered so far in this lesson: ask me "
-                "one short question at a time and check my answer before the next."
-            )
+            await self.send_to_tutor(QUIZ_MESSAGE)
+        elif event.button.id == "flashcards-btn":
+            await self.send_to_tutor(FLASHCARDS_MESSAGE)
         elif event.button.id == "practice-btn":
             await self.send_to_tutor(
                 "Give me a practice exercise for this lesson: skeleton Python "

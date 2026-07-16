@@ -52,6 +52,16 @@ to the local instance regardless of that env var.
   background 1-token request that prefills the prompt cache, so the first
   real message also starts in ~2s (fresh lessons get the same effect from
   the auto-start generation).
+- `app/skills.py` + `skills/` — teaching-skill playbooks in the
+  Agent-Skills format (SKILL.md, from DeepTutor's EduHub registry, MIT-0).
+  `agent.MODULE_SKILLS` maps modules to always-on skills
+  (python-foundations → python-playground-coach); `agent.MODE_SKILLS` are
+  the user-selectable tutor styles (socratic-tutor, concept-explainer),
+  persisted per lesson in progress.json (`teaching_skill`). Skill bodies
+  are appended to the system prompt via `SKILL_TEMPLATE`; skills.load() is
+  cached so the prompt stays byte-identical (prefix-cache requirement).
+  exam-blueprint and flashcard-deck shape the Quiz/Cards button messages
+  in `app/main.py` (sent as user messages, so no cache invalidation).
 - `app/rag.py` — the corpus registry (`SOURCES`), the local embedding index
   (`retrieve()`, backed by `nomic-embed-text` + a numpy cosine-similarity
   search over `data/rag_index/`), and full-lecture-text loading

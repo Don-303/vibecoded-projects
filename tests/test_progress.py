@@ -79,3 +79,14 @@ def test_code_persistence():
     assert progress.get_code("l1") == "x = 1\n"
     progress.save_code("l1", "   \n")  # whitespace-only clears the entry
     assert progress.get_code("l1") == ""
+
+
+def test_teaching_skill_persists_per_lesson():
+    from app import progress
+
+    assert progress.get_teaching_skill("l1") is None
+    progress.save_teaching_skill("l1", "socratic-tutor")
+    assert progress.get_teaching_skill("l1") == "socratic-tutor"
+    assert progress.get_teaching_skill("l2") is None
+    progress.save_teaching_skill("l1", None)
+    assert progress.get_teaching_skill("l1") is None

@@ -40,9 +40,16 @@ starting the app.
   example, a "what do you think this prints?" prediction, then a small
   challenge. Everywhere, hints escalate gradually (concept → line →
   solution shape → code) and errors are debugged one at a time.
-- Chat action buttons: "Quiz me", "Practice exercise" (skeleton code with
-  TODOs), "Worked example" (complete runnable code), and "Code → editor"
-  (drops the tutor's last code block into the editor).
+- Chat action buttons: "Quiz me" (exam-blueprint style: mixed question
+  types across sub-topics with a difficulty spread, one at a time, graded
+  as you go), "Practice" (skeleton code with TODOs), "Example" (complete
+  runnable code), "Cards" (an atomic Q/A + cloze flashcard deck from the
+  lesson), and "Code → editor" (drops the tutor's last code block into
+  the editor).
+- A per-lesson tutor style selector sits in the header: **standard**,
+  **Socratic** (leads you to answers with guiding questions and a hint
+  ladder), or **explainer** (layered explanations: one-liner → why →
+  analogy → worked example → check). The choice is remembered per lesson.
 - Run code with Ctrl+R (or the Run button), then "Send output to tutor" to
   get it reviewed. Matplotlib figures are saved to `data/plots/` (the path
   is printed in the output pane). A Stop button cancels a slow reply.
@@ -63,6 +70,26 @@ history are stored locally in `data/progress.json` (not committed to git).
 ```bash
 .venv/bin/pytest
 ```
+
+## Teaching skills (DeepTutor EduHub)
+
+The tutor's teaching methods are packaged as skills in the open
+Agent-Skills format (`skills/<name>/SKILL.md` — YAML frontmatter plus a
+markdown playbook), the same format used by
+[DeepTutor's EduHub registry](https://eduhub.deeptutor.info/skills), where
+these came from (MIT-0 licensed):
+
+- **python-playground-coach** — applied automatically to every
+  Python-foundations lesson (tiny goals, predict-what-it-prints, small
+  challenges).
+- **socratic-tutor** / **concept-explainer** — the header's tutor-style
+  selector.
+- **exam-blueprint** / **flashcard-deck** — power the "Quiz me" and
+  "Cards" buttons.
+
+Drop any other SKILL.md folder into `skills/` and it's loadable by name
+(`app/skills.py`); wire it to a module in `agent.MODULE_SKILLS` or to the
+style selector in `agent.MODE_SKILLS`.
 
 ## Grounding the tutor in real lecture material
 

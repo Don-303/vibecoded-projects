@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 
 from ollama import AsyncClient
 
-from app import rag
+from app import rag, skills
 from app.curriculum import Lesson
 
 # General-purpose instruct model rather than the Coder variant: this tutor
@@ -78,27 +78,25 @@ them to make one intentional change and predict the result, to confirm they \
 understood the fix rather than just pasting a patch.
 """
 
-# Extra coaching style for the beginner Python module, adapted from the
-# "python-playground-coach" teaching method: predict-then-run loops beat
-# lecturing for absolute basics. Applied per-module so the system prompt
-# stays deterministic per lesson (prefix-cache requirement).
-PLAYGROUND_COACH_TEMPLATE = """
-This is a beginner Python lesson, so use a playground-style teaching loop:
-- Set a tiny goal: exactly one concept at a time (variables, loops, \
-  functions, lists, dictionaries, files, errors).
-- Show a minimal runnable example, under 10 lines.
-- Ask the student to PREDICT what it prints before they run it.
-- Then give a small challenge: a short edit or extension of that example.
-- Do not move to the next concept until this one is demonstrated (their \
-  prediction was right, or the challenge was solved).
-Structure lesson replies as: Concept / Example (under 10 lines) / Challenge \
-/ Expected output / One extension idea. Good mini-projects to build toward: \
-number guessing game, quiz score calculator, shopping list manager, \
-word/character counter, CSV cleanup on a tiny inline sample.
+# Wraps a teaching-skill playbook (an EduHub/Agent-Skills SKILL.md body, see
+# app/skills.py) when one is active for the lesson.
+SKILL_TEMPLATE = """
+
+Teaching skill "{name}" is active for this lesson -- follow its playbook in \
+every reply, adapted to the current lesson's subject matter:
+
+{body}
 """
 
-# Modules whose lessons get the playground-coach block (beginner Python).
-PLAYGROUND_MODULE_IDS = {"python-foundations"}
+# Skills applied automatically to every lesson of a module. Keyed on module
+# id so the system prompt stays deterministic per lesson (prefix-cache
+# requirement). python-foundations: predict-then-run playground loops beat
+# lecturing for absolute basics.
+MODULE_SKILLS = {"python-foundations": "python-playground-coach"}
+
+# Skills the student can switch on per lesson as a "tutor style" (persisted
+# in progress.json and appended to the system prompt).
+MODE_SKILLS = ("socratic-tutor", "concept-explainer")
 
 # Sent on the student's behalf when they open a lesson with no history yet.
 AUTO_START_MESSAGE = "Please introduce this lesson and give me the first exercise."
@@ -130,12 +128,19 @@ using the chat history to judge how far you've already gotten.
 """
 
 
-def system_prompt(lesson: Lesson, extra_block: str = "") -> str:
+def system_prompt(lesson: Lesson, extra_block: str = "", skill_name: str | None = None) -> str:
     prompt = SYSTEM_TEMPLATE.format(
         module_title=lesson.module_title, lesson_title=lesson.title
     )
-    if lesson.module_id in PLAYGROUND_MODULE_IDS:
-        prompt += PLAYGROUND_COACH_TEMPLATE
+    active = [MODULE_SKILLS.get(lesson.module_id), skill_name]
+    seen: set[str] = set()
+    for name in active:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        skill = skills.load(name)
+        if skill:
+            prompt += SKILL_TEMPLATE.format(name=skill.name, body=skill.body)
     return prompt + extra_block
 
 
@@ -190,11 +195,13 @@ async def _lesson_extra_block(lesson: Lesson) -> str:
     return block
 
 
-async def stream_reply(lesson: Lesson, history: list[dict], user_message: str) -> AsyncIterator[str]:
+async def stream_reply(
+    lesson: Lesson, history: list[dict], user_message: str, skill_name: str | None = None
+) -> AsyncIterator[str]:
     extra_block = await _lesson_extra_block(lesson)
 
     messages = [
-        {"role": "system", "content": system_prompt(lesson, extra_block)}
+        {"role": "system", "content": system_prompt(lesson, extra_block, skill_name)}
     ]
     messages.extend(history)
     messages.append({"role": "user", "content": user_message})
@@ -220,14 +227,14 @@ async def warm_up() -> None:
         pass  # check_model_available() surfaces real problems to the user
 
 
-async def prewarm(lesson: Lesson, history: list[dict]) -> None:
+async def prewarm(lesson: Lesson, history: list[dict], skill_name: str | None = None) -> None:
     """Prefill llama.cpp's prompt cache with this lesson's system prompt and
     history (a 1-token request) so the user's next real message extends an
     already-processed prefix instead of paying the full prefill (measured up
     to ~80s on this CPU for source-heavy lessons)."""
     extra_block = await _lesson_extra_block(lesson)
     messages = [
-        {"role": "system", "content": system_prompt(lesson, extra_block)}
+        {"role": "system", "content": system_prompt(lesson, extra_block, skill_name)}
     ]
     messages.extend(history)
     try:
