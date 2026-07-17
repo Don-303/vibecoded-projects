@@ -3,10 +3,11 @@ import asyncio
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
-from textual.widgets import Button, Select, TextArea, Tree
+from textual.widgets import Button, Select, Tree
 
 from app import agent, kernel, progress, theming
 from app.main import ModelPicker, TutorApp
+from app.notebook import NotebookEditor
 
 CANNED = 'Intro!\n```python\nprint(1 + 1)\n```\nReady?'
 
@@ -70,15 +71,16 @@ def test_boot_picker_autostart_and_layout():
                 tree = app.query_one("#curriculum-tree", Tree)
                 assert sum(n.is_expanded for n in tree.root.children) == 1
 
-                # code -> editor pulls the fenced block
+                # code -> editor drops the fenced block into a cell
                 app.copy_last_code_to_editor()
-                assert "print(1 + 1)" in app.query_one("#code-editor", TextArea).text
+                await pilot.pause(0.2)
+                assert "print(1 + 1)" in app.query_one("#notebook", NotebookEditor).to_script()
 
                 # all action buttons exist
                 for bid in ("quiz-btn", "practice-btn", "example-btn",
                             "flashcards-btn", "project-btn",
                             "to-editor-btn", "stop-btn",
-                            "reset-btn"):
+                            "reset-btn", "run-btn", "run-all-btn", "send-btn"):
                     app.query_one(f"#{bid}", Button)
 
                 # tutor-style selector exists and defaults to standard
@@ -109,14 +111,14 @@ def test_code_persists_across_lesson_switch():
             async with app.run_test(size=(140, 40)) as pilot:
                 await _pick_model(pilot)
                 await pilot.pause(0.3)
-                editor = app.query_one("#code-editor", TextArea)
-                editor.text = "x = 42"
+                notebook = app.query_one("#notebook", NotebookEditor)
+                notebook.cells[0].editor.text = "x = 42"
                 app.load_lesson("py-numpy")
                 await pilot.pause(0.2)
-                assert editor.text == ""
+                assert notebook.to_script() == ""
                 app.load_lesson("py-core")
                 await pilot.pause(0.2)
-                assert editor.text == "x = 42"
+                assert notebook.to_script() == "x = 42"
 
     asyncio.run(scenario())
 
@@ -301,7 +303,8 @@ def test_editor_code_attached_once_to_typed_questions():
             async with app.run_test(size=(140, 40)) as pilot:
                 await _pick_model(pilot)
                 await pilot.pause(0.5)
-                app.query_one("#code-editor", TextArea).text = "z = 7"
+                notebook = app.query_one("#notebook", NotebookEditor)
+                notebook.cells[0].editor.text = "z = 7"
                 await app.send_to_tutor("why is my code wrong?", attach_editor=True)
                 await pilot.pause(0.5)
                 turns = [t for t in progress.get_history("py-core") if t["role"] == "user"]
@@ -348,7 +351,7 @@ def test_ctrl_f_sends_failed_run_to_tutor():
             async with app.run_test(size=(140, 40)) as pilot:
                 await _pick_model(pilot)
                 await pilot.pause(0.5)
-                app.query_one("#code-editor", TextArea).text = "1/0"
+                app.last_run_code = "1/0"
                 app.last_run_result = kernel.RunResult(
                     stdout="",
                     stderr="ZeroDivisionError: division by zero",
@@ -379,7 +382,7 @@ def test_ctrl_f_sends_failed_run_to_tutor():
 def test_plot_renderable_and_saved_plot_parsing(tmp_path):
     from PIL import Image
 
-    from app.main import SAVED_PLOT_RE, _plot_renderable
+    from app.notebook import SAVED_PLOT_RE, _plot_renderable
 
     path = tmp_path / "fig.png"
     Image.new("RGB", (64, 48), (200, 30, 30)).save(path)

@@ -23,17 +23,16 @@ from textual.widgets import (
     Input,
     Markdown,
     OptionList,
-    RichLog,
     Select,
     Static,
     TabbedContent,
     TabPane,
-    TextArea,
     Tree,
 )
 from textual.widgets.option_list import Option
 
 from app import __version__, agent, curriculum, kernel, progress, rag, theming
+from app.notebook import NotebookEditor
 
 DEFAULT_LESSON_ID = "py-core"
 
@@ -43,16 +42,36 @@ HELP_TEXT = f"""\
 ## Keyboard shortcuts
 | Key | Action |
 | --- | --- |
-| Ctrl+R | Run the editor (or just the selected lines) in IPython |
+| Ctrl+R | Run the current notebook cell |
+| F5 | Run all cells, top to bottom |
 | Ctrl+N | Next lesson |
 | Ctrl+B | Show/hide the curriculum sidebar |
-| Ctrl+E | Show/hide the code editor panel |
+| Ctrl+E | Show/hide the notebook panel |
 | Ctrl+T | Switch model (Escape cancels) |
 | Ctrl+D | Jump to the next lesson due for review |
 | Ctrl+F | Send the last failed run's error to the tutor for help |
 | F1 | This help |
 | F2 | Variable explorer (live kernel variables: name/type/shape/value) |
 | Ctrl+Q | Quit |
+
+## Notebook keys (Jupyter-style)
+The notebook has two modes. **Edit mode** (green border): type in the
+cell; Esc leaves to command mode; Shift+Enter runs and advances,
+Ctrl+Enter runs in place. **Command mode** (blue border, keys act on the
+selected cell):
+| Key | Action |
+| --- | --- |
+| ↑/k · ↓/j | select cell above / below |
+| Enter | edit the selected cell |
+| Shift+Enter · Ctrl+Enter · r | run (+ advance · in place · in place) |
+| a / b | insert a cell above / below |
+| d d | delete cell (z undoes) |
+| x / c / v | cut / copy / paste cell |
+| m / y | convert to markdown / code |
+| o | collapse / expand the cell's output |
+| e | ask the tutor to explain the cell |
+| f | ask the tutor to fix the cell's error |
+| 0 0 | restart the kernel |
 
 ## Chat actions
 - **Quiz me** — 5 questions, one at a time, graded as you go. The final
@@ -71,13 +90,13 @@ sets an exercise. Write code in the editor, Ctrl+R to run, then "Send
 output to tutor" for review. Mark the lesson complete when it clicks;
 it returns for spaced review a week later (↻ in the tree).
 
-The editor runs on a persistent IPython kernel: variables survive between
-runs, a bare expression on the last line echoes its value, and selecting
-lines runs just those. "Restart" wipes the kernel's variables. F2 opens
-the variable explorer (refreshed after every run); matplotlib figures
-render inline in the output pane and are saved to data/plots/. If a run
-fails, Ctrl+F sends the code and traceback straight to the tutor for
-debugging help.
+The notebook runs on a persistent IPython kernel: variables survive
+between cells and runs, and a bare expression at the end of a cell
+echoes its value. Each cell's output (stdout, tracebacks, inline
+matplotlib figures, run time) appears right under it. "Restart" wipes
+the kernel's variables. F2 opens the variable explorer (refreshed after
+every run). If a run fails, Ctrl+F (or f in command mode) sends the code
+and traceback straight to the tutor for debugging help.
 
 The tutor is connected to your environment: typed questions automatically
 attach your editor code when it changed, and the tutor can run a small
@@ -128,9 +147,10 @@ FIX_ERROR_MESSAGE = (
     "My run failed. Coach me through fixing it -- most important error "
     "first, and don't rewrite the code for me."
 )
-# The kernel's plot epilogue prints one of these per saved figure; the run
-# worker picks them up to render the image inline in the output pane.
-SAVED_PLOT_RE = re.compile(r"^\[saved plot: (.+)\]$", re.MULTILINE)
+EXPLAIN_CELL_MESSAGE = (
+    "Walk me through what this cell does, briefly, and point out anything "
+    "wrong or unidiomatic."
+)
 FLASHCARDS_MESSAGE = (
     "Make me a flashcard deck for this lesson: extract the 5-10 ideas most "
     "worth remembering from what we've covered. One fact per card; fronts "
@@ -151,24 +171,6 @@ PROJECT_MESSAGE = (
     "a time, skeleton code with TODOs, and review my output before we "
     "move on."
 )
-
-
-def _plot_renderable(path: str, max_width: int):
-    """A saved matplotlib PNG rendered as unicode half-block pixels, so
-    figures show up right in the output pane instead of only landing in
-    data/plots/. Returns None if the file or imaging deps are unavailable
-    (the caller falls back to the saved-path text line, which is already
-    printed)."""
-    try:
-        from PIL import Image
-        from rich_pixels import Pixels
-
-        img = Image.open(path).convert("RGB")
-        width = max(24, min(max_width, 80))
-        img = img.resize((width, max(2, int(img.height * width / img.width))))
-        return Pixels.from_image(img)
-    except Exception:
-        return None
 
 
 class ModelPicker(ModalScreen[str]):
@@ -311,12 +313,8 @@ class TutorApp(App):
     #chat-input {
         margin: 0 1;
     }
-    #code-editor {
+    #notebook {
         height: 1fr;
-    }
-    #code-output {
-        height: 10;
-        border-top: solid $accent;
     }
     #vars-table {
         height: 12;
@@ -372,7 +370,8 @@ class TutorApp(App):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
-        ("ctrl+r", "run_code", "Run code"),
+        ("ctrl+r", "run_code", "Run cell"),
+        ("f5", "run_all", "Run all"),
         ("ctrl+n", "next_lesson", "Next lesson"),
         ("ctrl+b", "toggle_sidebar", "Sidebar"),
         ("ctrl+e", "toggle_code_panel", "Code panel"),
@@ -391,6 +390,10 @@ class TutorApp(App):
         widget lookup in this class goes through here instead."""
         return self.screen_stack[0]
 
+    @property
+    def notebook(self) -> NotebookEditor:
+        return self.main_screen.query_one("#notebook", NotebookEditor)
+
     def __init__(self) -> None:
         super().__init__()
         # Resume where the student left off last session.
@@ -402,6 +405,7 @@ class TutorApp(App):
         self.session_start = time.monotonic()
         self.lesson_start: float | None = None
         self.last_run_result: kernel.RunResult | None = None
+        self.last_run_code: str | None = None
         # Editor snapshot last shown to the tutor, per lesson -- attach the
         # code to a typed question only when it changed since.
         self._attached_code: dict[str, str] = {}
@@ -470,32 +474,29 @@ class TutorApp(App):
                                         tooltip="Cancel the tutor's current reply",
                                     )
                             with Vertical(id="code-panel"):
-                                # code_editor preset: Tab indents (instead of
-                                # moving focus), line numbers, no soft wrap.
-                                yield TextArea.code_editor(
-                                    "",
-                                    language="python",
-                                    id="code-editor",
-                                    theme="monokai",
-                                )
+                                yield NotebookEditor(id="notebook")
                                 with Horizontal(id="code-actions"):
                                     yield Button(
                                         "Run", id="run-btn", variant="primary", compact=True,
-                                        tooltip="Run the code (Ctrl+R); plots are "
-                                        "saved to data/plots/",
+                                        tooltip="Run the current cell (Ctrl+R; "
+                                        "Shift+Enter runs and advances)",
                                     )
                                     yield Button(
-                                        "Send output to tutor", id="send-btn", compact=True,
-                                        tooltip="Send your code and its output to "
-                                        "the tutor for review",
+                                        "Run all", id="run-all-btn", compact=True,
+                                        tooltip="Run every code cell, top to bottom (F5)",
+                                    )
+                                    yield Button(
+                                        "Review", id="send-btn", compact=True,
+                                        tooltip="Send your notebook and its last run "
+                                        "output to the tutor for review",
                                     )
                                     yield Button(
                                         "Copy", id="copy-btn", compact=True,
-                                        tooltip="Copy the editor contents to the clipboard",
+                                        tooltip="Copy the notebook to the clipboard",
                                     )
                                     yield Button(
                                         "Clear", id="clear-btn", compact=True,
-                                        tooltip="Clear the editor and output pane",
+                                        tooltip="Reset the notebook to one empty cell",
                                     )
                                     yield Button(
                                         "Plots", id="plots-btn", compact=True,
@@ -507,7 +508,6 @@ class TutorApp(App):
                                         "(clears all variables)",
                                     )
                                 yield DataTable(id="vars-table", cursor_type="row")
-                                yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
                         with VerticalScroll():
                             yield Markdown("", id="progress-view")
@@ -528,8 +528,7 @@ class TutorApp(App):
 
     def on_mount(self) -> None:
         self.main_screen.query_one("#chat-panel").border_title = "Tutor"
-        self.main_screen.query_one("#code-panel").border_title = "IPython editor"
-        self.main_screen.query_one("#code-output", RichLog).border_title = "Output"
+        self.main_screen.query_one("#code-panel").border_title = "IPython notebook"
         vars_table = self.main_screen.query_one("#vars-table", DataTable)
         vars_table.add_columns("name", "type", "shape", "value")
         vars_table.border_title = "Kernel variables"
@@ -608,11 +607,13 @@ class TutorApp(App):
 
     def _save_editor_code(self) -> None:
         if self._code_loaded_for is not None:
-            editor = self.main_screen.query_one("#code-editor", TextArea)
-            progress.save_code(self._code_loaded_for, editor.text)
+            progress.save_code(self._code_loaded_for, self.notebook.to_script())
 
-    def action_run_code(self) -> None:
-        self.run_code()
+    async def action_run_code(self) -> None:
+        await self.notebook.run_current()
+
+    def action_run_all(self) -> None:
+        self.run_worker(self.notebook.run_all(), group="run-code", exclusive=True)
 
     def action_next_lesson(self) -> None:
         nxt = curriculum.next_lesson(self.current_lesson_id)
@@ -690,21 +691,43 @@ class TutorApp(App):
         result = self.last_run_result
         if result is None or not result.stderr.strip():
             self.notify(
-                "No failed run to fix — run some code first (Ctrl+R).",
+                "No failed run to fix — run a cell first (Ctrl+R).",
                 severity="warning",
             )
             return
-        code = self.main_screen.query_one("#code-editor", TextArea).text.strip()
-        # The tutor is about to see this exact code; don't re-attach it to
-        # the next typed question.
-        self._attached_code[self.current_lesson_id] = code
+        code = (self.last_run_code or "").strip()
         error = result.stderr.strip()[-ERROR_ATTACH_LIMIT:]
         message = (
             f"{FIX_ERROR_MESSAGE}\n\n"
-            f"My code:\n```python\n{code[:ATTACH_CODE_LIMIT]}\n```\n\n"
+            f"My cell:\n```python\n{code[:ATTACH_CODE_LIMIT]}\n```\n\n"
             f"Error:\n```\n{error}\n```"
         )
         await self.send_to_tutor(message)
+
+    def on_notebook_editor_cell_ran(self, event: NotebookEditor.CellRan) -> None:
+        self.last_run_result = event.result
+        self.last_run_code = event.code
+        self._refresh_vars()
+
+    async def on_notebook_editor_tutor_help(self, event: NotebookEditor.TutorHelp) -> None:
+        if event.kind == "fix":
+            await self.action_fix_error()
+        else:
+            await self.send_to_tutor(
+                f"{EXPLAIN_CELL_MESSAGE}\n"
+                f"```python\n{event.code[:ATTACH_CODE_LIMIT]}\n```"
+            )
+
+    async def on_notebook_editor_restart_requested(
+        self, event: NotebookEditor.RestartRequested
+    ) -> None:
+        await self._restart_kernel()
+
+    async def _restart_kernel(self) -> None:
+        self.notify("Restarting the IPython kernel...")
+        await asyncio.to_thread(kernel.restart)
+        self._refresh_vars()
+        self.notify("Kernel restarted — all variables cleared.")
 
     def _flush_lesson_time(self, restart: bool = False) -> None:
         if self.lesson_start is not None and self.current_lesson_id:
@@ -776,7 +799,7 @@ class TutorApp(App):
         self.current_lesson_id = lesson_id
         progress.save_last_lesson(lesson_id)
         self.lesson_start = time.monotonic()
-        self.main_screen.query_one("#code-editor", TextArea).text = progress.get_code(lesson_id)
+        self.notebook.load_script(progress.get_code(lesson_id))
         self._code_loaded_for = lesson_id
         if progress.is_review_due(lesson_id):
             status = "↻ review due"
@@ -796,7 +819,6 @@ class TutorApp(App):
         history = progress.get_history(lesson_id)
         self.chat_buffer = self._render_history(history)
         chat_log = self.main_screen.query_one("#chat-log", Markdown)
-        self.main_screen.query_one("#code-output", RichLog).clear()
         if history:
             chat_log.update(self.chat_buffer)
             # Prefill the model's prompt cache for this lesson in the
@@ -835,9 +857,9 @@ class TutorApp(App):
         await self.send_to_tutor(message, attach_editor=True)
 
     def _with_editor_attached(self, message: str) -> str:
-        """Append the editor code to a typed question if it changed since the
-        tutor last saw it, so "why is my code wrong?" just works."""
-        code = self.main_screen.query_one("#code-editor", TextArea).text.strip()
+        """Append the notebook code to a typed question if it changed since
+        the tutor last saw it, so "why is my code wrong?" just works."""
+        code = self.notebook.to_script().strip()
         if not code or code == self._attached_code.get(self.current_lesson_id):
             return message
         self._attached_code[self.current_lesson_id] = code
@@ -1061,7 +1083,9 @@ class TutorApp(App):
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "run-btn":
-            self.run_code()
+            await self.notebook.run_current()
+        elif event.button.id == "run-all-btn":
+            self.action_run_all()
         elif event.button.id == "send-btn":
             await self.send_code_output_to_tutor()
         elif event.button.id == "complete-btn":
@@ -1115,18 +1139,14 @@ class TutorApp(App):
         elif event.button.id == "stop-btn":
             self.action_stop_generation()
         elif event.button.id == "copy-btn":
-            self.copy_to_clipboard(self.main_screen.query_one("#code-editor", TextArea).text)
-            self.notify("Editor contents copied to clipboard.")
+            self.copy_to_clipboard(self.notebook.to_script())
+            self.notify("Notebook copied to clipboard.")
         elif event.button.id == "clear-btn":
-            self.main_screen.query_one("#code-editor", TextArea).text = ""
-            self.main_screen.query_one("#code-output", RichLog).clear()
+            self.notebook.load_script("")
             self.last_run_result = None
+            self.last_run_code = None
         elif event.button.id == "restart-kernel-btn":
-            self.notify("Restarting the IPython kernel...")
-            await asyncio.to_thread(kernel.restart)
-            self.main_screen.query_one("#code-output", RichLog).clear()
-            self._refresh_vars()
-            self.notify("Kernel restarted — all variables cleared.")
+            await self._restart_kernel()
         elif event.button.id == "plots-btn":
             if kernel.PLOTS_DIR.is_dir() and any(kernel.PLOTS_DIR.iterdir()):
                 subprocess.Popen(
@@ -1152,78 +1172,22 @@ class TutorApp(App):
 
     def copy_last_code_to_editor(self) -> None:
         """Pull the most recent ```python block from the tutor's replies into
-        the code editor, so exercises are one click from runnable."""
+        a notebook cell, so exercises are one click from runnable."""
         for turn in reversed(progress.get_history(self.current_lesson_id)):
             if turn["role"] != "assistant":
                 continue
             blocks = re.findall(r"```(?:python|py)?\n(.*?)```", turn["content"], re.DOTALL)
             if blocks:
-                editor = self.main_screen.query_one("#code-editor", TextArea)
-                editor.text = blocks[-1].strip() + "\n"
+                self.notebook.insert_code_below(blocks[-1].strip())
                 self.main_screen.query_one(TabbedContent).active = "tab-work"
                 self.main_screen.query_one("#code-panel").display = True
-                editor.focus()
-                self.notify("Code copied to editor — Ctrl+R to run.")
+                self.notebook.focus()
+                self.notify("Code added to the notebook — Ctrl+R to run.")
                 return
         self.notify("No code block found in the tutor's replies yet.", severity="warning")
 
-    def run_code(self) -> None:
-        self.run_worker(self._run_code_worker(), exclusive=True, group="run-code")
-
-    async def _run_code_worker(self) -> None:
-        editor = self.main_screen.query_one("#code-editor", TextArea)
-        # IPython-style incremental work: a selection runs alone against the
-        # kernel's persistent namespace; no selection runs the whole buffer.
-        code = editor.selected_text or editor.text
-        output_log = self.main_screen.query_one("#code-output", RichLog)
-        run_btn = self.main_screen.query_one("#run-btn", Button)
-        output_log.clear()
-        run_btn.disabled = True
-
-        # Stream output live as the kernel produces it (a training loop
-        # printing per epoch shouldn't look frozen for a minute). Chunks
-        # arrive on the kernel thread and may be partial lines; buffer to
-        # line boundaries before writing.
-        buffers = {"stdout": "", "stderr": ""}
-
-        def write_line(name: str, line: str) -> None:
-            output_log.write(f"[red]{line}[/red]" if name == "stderr" else line)
-
-        def on_chunk(name: str, text: str) -> None:
-            buffers[name] += text
-            while "\n" in buffers[name]:
-                line, buffers[name] = buffers[name].split("\n", 1)
-                self.call_from_thread(write_line, name, line)
-
-        started = time.monotonic()
-        try:
-            # Kernel call blocks up to kernel.TIMEOUT_SECONDS; keep the UI alive.
-            result = await asyncio.to_thread(kernel.run_code, code, on_chunk)
-        finally:
-            run_btn.disabled = False
-        self.last_run_result = result
-        for name, rest in buffers.items():
-            if rest:
-                write_line(name, rest)
-        if not result.stdout and not result.stderr:
-            output_log.write("[dim](no output)[/dim]")
-        # Saved figures render inline as unicode pixels; the saved-path
-        # line has already been printed above as a fallback pointer.
-        for path in SAVED_PLOT_RE.findall(result.stdout):
-            pixels = _plot_renderable(path, output_log.size.width - 4)
-            if pixels is not None:
-                output_log.write(pixels)
-        status = "interrupted" if result.timed_out else "done"
-        output_log.write(f"[dim][{status} in {time.monotonic() - started:.1f}s][/dim]")
-        if result.returncode != 0 and not result.timed_out and result.stderr.strip():
-            output_log.write(
-                "[red]✗ the run failed[/red][dim] — Ctrl+F sends the error "
-                "to the tutor for help[/dim]"
-            )
-        self._refresh_vars()
-
     async def send_code_output_to_tutor(self) -> None:
-        code = self.main_screen.query_one("#code-editor", TextArea).text
+        code = self.notebook.to_script()
         result = self.last_run_result
         if result is None:
             output_text = "(code has not been run yet)"

@@ -93,14 +93,25 @@ to the local instance regardless of that env var.
   lazily + warmed at app start; shut down on quit and via atexit.
   `list_variables()` inventories the user namespace (name/type/shape/
   value, via a marker-line JSON snippet) for the variable explorer.
-- Workbench extras in `app/main.py` (inspired by ~/Projects/quantlab's
-  notebook TUI): F2 toggles the variable-explorer DataTable (refreshed
-  after every run, tutor check, and kernel restart — only when visible);
-  saved figures are re-rendered inline in the output RichLog as unicode
-  half-block pixels (rich-pixels + Pillow, `_plot_renderable`, keyed off
-  the kernel's "[saved plot: …]" stdout lines); Ctrl+F sends a failed
-  run's code + traceback tail to the tutor as a coach-style debugging
-  request (and marks the code as seen so it isn't re-attached).
+- `app/notebook.py` — the cell-based notebook editor in the code panel
+  (adapted from ~/Projects/quantlab's TUI): `NotebookEditor` is a
+  focusable VerticalScroll of `Cell` widgets owning Jupyter's two-mode
+  keymap (command mode on the panel: j/k, Enter, a/b, dd/z, x/c/v, m/y,
+  o collapse, 00 restart, e/f tutor help; edit mode in `CellTextArea`:
+  Esc, Shift+Enter, Ctrl+Enter). Cells execute via `kernel.run_code`
+  with live streamed output, inline unicode-pixel plots (rich-pixels +
+  Pillow, keyed off the kernel's "[saved plot: …]" stdout lines), In [n]
+  gutters and per-cell run times. Persistence is a jupytext-style
+  percent script (`cells_to_script`/`script_to_cells`; a single code
+  cell stays a bare script, so old single-buffer saves round-trip) in
+  progress.json's per-lesson `code` key. Talks to the app via messages:
+  `CellRan` (updates `last_run_result`/`last_run_code` + vars refresh),
+  `TutorHelp` (e explain / f fix → Ctrl+F flow), `RestartRequested`.
+- Workbench extras in `app/main.py`: F2 toggles the variable-explorer
+  DataTable (refreshed after every run, tutor check, and kernel restart
+  — only when visible); Ctrl+F sends the last failed cell's code +
+  traceback tail to the tutor as a coach-style debugging request; F5 /
+  "Run all" runs every code cell top to bottom.
 - `app/theming.py` — maps the desktop theme to a Textual theme (Omarchy
   theme.name → same-named/renamed builtin, light.mode marker or gsettings
   for light/dark fallback). Polled every 3s off-thread from `main.py`;
@@ -110,8 +121,8 @@ to the local instance regardless of that env var.
   scores (`quiz_scores`): QUIZ_MESSAGE instructs a final "Final score:
   N/5" line, `main.QUIZ_SCORE_RE` captures it best-effort, and a last
   score < 60% shortens that lesson's review interval from 7 to 3 days.
-- `app/main.py` — the Textual TUI: sidebar lesson tree, chat tab, code
-  editor tab with run/send-to-tutor. Modal screens: ModelPicker (launch +
+- `app/main.py` — the Textual TUI: sidebar lesson tree, chat panel, and
+  the notebook panel side by side. Modal screens: ModelPicker (launch +
   Ctrl+T), HelpScreen (F1), ConfirmScreen (destructive actions). The
   `TabbedContent { height: 1fr }` CSS rule is load-bearing: without it the
   bottom action row overflows the screen on short terminals.

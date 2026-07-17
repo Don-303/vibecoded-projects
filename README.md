@@ -40,8 +40,8 @@ starting the app.
   (try "garch"). Ctrl+B hides the sidebar entirely.
 - Ctrl+T switches the model mid-session (same picker as at launch; the
   new model is warmed and the lesson prompt prefilled in the background).
-- The workspace shows the tutor chat and the code editor side by side
-  (Ctrl+E hides/shows the editor pane). Opening a fresh lesson auto-starts
+- The workspace shows the tutor chat and the notebook side by side
+  (Ctrl+E hides/shows the notebook pane). Opening a fresh lesson auto-starts
   it: the tutor introduces the concept and gives you an exercise.
 - Beginner Python lessons use a playground-style loop: a tiny runnable
   example, a "what do you think this prints?" prediction, then a small
@@ -52,7 +52,7 @@ starting the app.
   as you go), "Practice" (skeleton code with TODOs), "Example" (complete
   runnable code), "Cards" (an atomic Q/A + cloze flashcard deck from the
   lesson), and "Code → editor" (drops the tutor's last code block into
-  the editor).
+  a notebook cell).
 - The app follows your desktop theme, live: if your system theme has a
   Textual counterpart (nord, gruvbox, tokyo-night, catppuccin, …) it's
   used directly, otherwise the app just matches light/dark. Switching the
@@ -66,31 +66,39 @@ starting the app.
   **Socratic** (leads you to answers with guiding questions and a hint
   ladder), or **explainer** (layered explanations: one-liner → why →
   analogy → worked example → check). The choice is remembered per lesson.
-- The editor runs on a persistent IPython kernel: run with Ctrl+R (or the
-  Run button) and variables survive between runs — build up your analysis
-  incrementally like a notebook. Selecting lines runs just the selection;
-  a bare expression echoes its value like the REPL; errors come back as
-  real tracebacks. Output streams into the pane live as it's printed
-  (training loops show progress per epoch), ending with a run-time line.
-  "Restart" wipes the kernel's variables. Then "Send output to tutor" to
-  get the run reviewed. Matplotlib figures render inline in the output
-  pane as unicode pixel graphics and are also saved to `data/plots/`
-  (the "Plots" button opens the folder in your image viewer). A Stop
-  button cancels a slow tutor reply.
+- The code pane is a **cell-based IPython notebook** (the same editor as
+  the quantlab project): Jupyter's two-mode keymap — command mode on the
+  panel (`j`/`k` select, `Enter` to edit, `a`/`b` insert, `dd` delete
+  with `z` undo, `x`/`c`/`v` cut/copy/paste, `m`/`y` convert to
+  markdown/code, `o` collapse output, `00` restart the kernel), edit
+  mode in a cell (`Esc` out, `Shift+Enter` run + advance, `Ctrl+Enter`
+  run in place). Cells run in a persistent IPython kernel, so variables
+  survive between cells and runs — build the analysis incrementally. A
+  bare expression at the end of a cell echoes its value like the REPL;
+  errors come back as real tracebacks. Each cell shows its own output
+  right under it, streaming live as it's printed (training loops show
+  progress per epoch), with `In [n]:` gutters and a per-cell run time.
+  F5 runs all cells top to bottom. Matplotlib figures render inline
+  under the cell as unicode pixel graphics and are also saved to
+  `data/plots/` (the "Plots" button opens the folder in your image
+  viewer). The per-lesson notebook is saved as a jupytext-style percent
+  script and restored when you come back.
 - F2 opens the variable explorer: a live table of the kernel's variables
   (name, type, shape, value) that refreshes after every run — see at a
   glance what you've defined and whether that DataFrame has the shape
-  you think it has. If a run fails, Ctrl+F sends your code and the
-  traceback straight to the tutor as a debugging request (it coaches you
-  through the fix rather than rewriting your code for you).
+  you think it has. If a run fails, Ctrl+F (or `f` in command mode)
+  sends the failing cell and its traceback straight to the tutor as a
+  debugging request (it coaches you through the fix rather than
+  rewriting your code for you); `e` asks it to explain the selected
+  cell. "Review" sends the whole notebook and the last run's output for
+  review, and a Stop button cancels a slow tutor reply.
 - The tutor interacts with your environment: questions you type
-  automatically include your editor code (when it changed since the tutor
+  automatically include your notebook code (when it changed since the tutor
   last saw it), and the tutor can run a small inspection snippet in your
   live kernel — checking shapes, dtypes, or asserting on your variables —
   with the output fed back to it automatically, so "verify my solution"
   is checked against reality rather than guessed at. One check per
   message, always visible in the chat.
-- Your editor code is saved per lesson and restored when you come back.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
   The app reopens on whatever lesson you had open last session, and
   Ctrl+D jumps straight to the next lesson due for review.
