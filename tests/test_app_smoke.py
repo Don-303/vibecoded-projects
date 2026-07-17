@@ -316,6 +316,80 @@ def test_editor_code_attached_once_to_typed_questions():
     asyncio.run(scenario())
 
 
+def test_variable_explorer_toggles_and_refreshes():
+    async def scenario():
+        with _mocked_model(), patch.object(
+            kernel, "list_variables", lambda: [("x", "int", "", "7")]
+        ):
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                from textual.widgets import DataTable
+
+                table = app.query_one("#vars-table", DataTable)
+                assert not table.display
+                await pilot.press("f2")
+                await pilot.pause(0.3)
+                assert table.display
+                assert table.row_count == 1
+                assert "Kernel variables (1)" in str(table.border_title)
+                await pilot.press("f2")
+                await pilot.pause(0.1)
+                assert not table.display
+
+    asyncio.run(scenario())
+
+
+def test_ctrl_f_sends_failed_run_to_tutor():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.5)
+                app.query_one("#code-editor", TextArea).text = "1/0"
+                app.last_run_result = kernel.RunResult(
+                    stdout="",
+                    stderr="ZeroDivisionError: division by zero",
+                    timed_out=False,
+                    returncode=1,
+                )
+                await app.action_fix_error()
+                # wait for the tutor's reply to the fix request to land
+                for _ in range(50):
+                    await pilot.pause(0.1)
+                    history = progress.get_history("py-core")
+                    if len(history) >= 3 and history[-1]["role"] == "assistant":
+                        break
+                turns = [t for t in history if t["role"] == "user"]
+                assert "My run failed" in turns[-1]["content"]
+                assert "ZeroDivisionError" in turns[-1]["content"]
+                assert "1/0" in turns[-1]["content"]
+                # a successful (or absent) run has nothing to fix
+                before = len(progress.get_history("py-core"))
+                app.last_run_result = None
+                await app.action_fix_error()
+                await pilot.pause(0.3)
+                assert len(progress.get_history("py-core")) == before
+
+    asyncio.run(scenario())
+
+
+def test_plot_renderable_and_saved_plot_parsing(tmp_path):
+    from PIL import Image
+
+    from app.main import SAVED_PLOT_RE, _plot_renderable
+
+    path = tmp_path / "fig.png"
+    Image.new("RGB", (64, 48), (200, 30, 30)).save(path)
+    assert _plot_renderable(str(path), max_width=60) is not None
+    # unreadable file -> graceful None (the text fallback is already printed)
+    assert _plot_renderable(str(tmp_path / "missing.png"), max_width=60) is None
+    stdout = f"some output\n[saved plot: {path}]\n"
+    assert SAVED_PLOT_RE.findall(stdout) == [str(path)]
+
+
 def test_tutor_check_runs_in_kernel_once():
     calls = {"n": 0}
     ran: list[str] = []

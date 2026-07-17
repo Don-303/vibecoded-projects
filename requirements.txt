@@ -11,6 +11,7 @@ quantstats
 torch
 matplotlib
 rich
+rich-pixels
 pyyaml
 ipykernel
 pytest

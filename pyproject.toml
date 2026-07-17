@@ -17,6 +17,7 @@ dependencies = [
     "quantstats",
     "torch",
     "rich",
+    "rich-pixels",
     "pyyaml",
     "ipykernel",
 ]

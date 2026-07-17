@@ -91,6 +91,16 @@ to the local instance regardless of that env var.
   timeouts interrupt (not kill) the kernel, matplotlib figures are saved
   to data/plots/ after each run, and restart() wipes state. Started
   lazily + warmed at app start; shut down on quit and via atexit.
+  `list_variables()` inventories the user namespace (name/type/shape/
+  value, via a marker-line JSON snippet) for the variable explorer.
+- Workbench extras in `app/main.py` (inspired by ~/Projects/quantlab's
+  notebook TUI): F2 toggles the variable-explorer DataTable (refreshed
+  after every run, tutor check, and kernel restart — only when visible);
+  saved figures are re-rendered inline in the output RichLog as unicode
+  half-block pixels (rich-pixels + Pillow, `_plot_renderable`, keyed off
+  the kernel's "[saved plot: …]" stdout lines); Ctrl+F sends a failed
+  run's code + traceback tail to the tutor as a coach-style debugging
+  request (and marks the code as seen so it isn't re-attached).
 - `app/theming.py` — maps the desktop theme to a Textual theme (Omarchy
   theme.name → same-named/renamed builtin, light.mode marker or gsettings
   for light/dark fallback). Polled every 3s off-thread from `main.py`;

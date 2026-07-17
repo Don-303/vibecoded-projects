@@ -13,9 +13,11 @@ import time
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    DataTable,
     Footer,
     Header,
     Input,
@@ -47,7 +49,9 @@ HELP_TEXT = f"""\
 | Ctrl+E | Show/hide the code editor panel |
 | Ctrl+T | Switch model (Escape cancels) |
 | Ctrl+D | Jump to the next lesson due for review |
+| Ctrl+F | Send the last failed run's error to the tutor for help |
 | F1 | This help |
+| F2 | Variable explorer (live kernel variables: name/type/shape/value) |
 | Ctrl+Q | Quit |
 
 ## Chat actions
@@ -69,7 +73,11 @@ it returns for spaced review a week later (↻ in the tree).
 
 The editor runs on a persistent IPython kernel: variables survive between
 runs, a bare expression on the last line echoes its value, and selecting
-lines runs just those. "Restart" wipes the kernel's variables.
+lines runs just those. "Restart" wipes the kernel's variables. F2 opens
+the variable explorer (refreshed after every run); matplotlib figures
+render inline in the output pane and are saved to data/plots/. If a run
+fails, Ctrl+F sends the code and traceback straight to the tutor for
+debugging help.
 
 The tutor is connected to your environment: typed questions automatically
 attach your editor code when it changed, and the tutor can run a small
@@ -113,6 +121,16 @@ CHECK_OUTPUT_LIMIT = 1500
 # Editor snapshots attached to typed questions are capped so a long script
 # can't blow up the prompt.
 ATTACH_CODE_LIMIT = 3000
+# Tracebacks sent with "fix this" keep only the tail -- that's where the
+# actual error is; the frames above it are usually noise at this size.
+ERROR_ATTACH_LIMIT = 1500
+FIX_ERROR_MESSAGE = (
+    "My run failed. Coach me through fixing it -- most important error "
+    "first, and don't rewrite the code for me."
+)
+# The kernel's plot epilogue prints one of these per saved figure; the run
+# worker picks them up to render the image inline in the output pane.
+SAVED_PLOT_RE = re.compile(r"^\[saved plot: (.+)\]$", re.MULTILINE)
 FLASHCARDS_MESSAGE = (
     "Make me a flashcard deck for this lesson: extract the 5-10 ideas most "
     "worth remembering from what we've covered. One fact per card; fronts "
@@ -133,6 +151,24 @@ PROJECT_MESSAGE = (
     "a time, skeleton code with TODOs, and review my output before we "
     "move on."
 )
+
+
+def _plot_renderable(path: str, max_width: int):
+    """A saved matplotlib PNG rendered as unicode half-block pixels, so
+    figures show up right in the output pane instead of only landing in
+    data/plots/. Returns None if the file or imaging deps are unavailable
+    (the caller falls back to the saved-path text line, which is already
+    printed)."""
+    try:
+        from PIL import Image
+        from rich_pixels import Pixels
+
+        img = Image.open(path).convert("RGB")
+        width = max(24, min(max_width, 80))
+        img = img.resize((width, max(2, int(img.height * width / img.width))))
+        return Pixels.from_image(img)
+    except Exception:
+        return None
 
 
 class ModelPicker(ModalScreen[str]):
@@ -282,6 +318,11 @@ class TutorApp(App):
         height: 10;
         border-top: solid $accent;
     }
+    #vars-table {
+        height: 12;
+        display: none;
+        border-top: solid $accent;
+    }
     ModelPicker, HelpScreen, ConfirmScreen {
         align: center middle;
     }
@@ -338,6 +379,8 @@ class TutorApp(App):
         ("ctrl+t", "switch_model", "Model"),
         ("ctrl+d", "next_review", "Review"),
         ("f1", "show_help", "Help"),
+        ("f2", "toggle_vars", "Vars"),
+        ("ctrl+f", "fix_error", "Fix error"),
     ]
 
     @property
@@ -463,6 +506,7 @@ class TutorApp(App):
                                         tooltip="Restart the IPython kernel "
                                         "(clears all variables)",
                                     )
+                                yield DataTable(id="vars-table", cursor_type="row")
                                 yield RichLog(id="code-output", highlight=True, markup=True)
                     with TabPane("Progress", id="tab-progress"):
                         with VerticalScroll():
@@ -486,6 +530,9 @@ class TutorApp(App):
         self.main_screen.query_one("#chat-panel").border_title = "Tutor"
         self.main_screen.query_one("#code-panel").border_title = "IPython editor"
         self.main_screen.query_one("#code-output", RichLog).border_title = "Output"
+        vars_table = self.main_screen.query_one("#vars-table", DataTable)
+        vars_table.add_columns("name", "type", "shape", "value")
+        vars_table.border_title = "Kernel variables"
         # Start the kernel while the user picks a model/lesson, so the
         # first Run doesn't pay the kernel's cold start.
         self.run_worker(self._warm_kernel(), group="kernel-warm")
@@ -535,7 +582,12 @@ class TutorApp(App):
         elapsed = int(time.monotonic() - self.session_start)
         h, rem = divmod(elapsed, 3600)
         m, s = divmod(rem, 60)
-        timer = self.main_screen.query_one("#session-timer", Static)
+        try:
+            timer = self.main_screen.query_one("#session-timer", Static)
+        except NoMatches:
+            # The tick can land mid-shutdown, after the screen's widgets
+            # are already unmounted; nothing left to update.
+            return
         timer.update(f"Session: {h:02d}:{m:02d}:{s:02d}")
         # Checkpoint tracked time and editor code every minute so closing the
         # terminal abruptly (instead of ctrl+q) loses at most a minute.
@@ -611,6 +663,48 @@ class TutorApp(App):
     def action_toggle_code_panel(self) -> None:
         panel = self.main_screen.query_one("#code-panel")
         panel.display = not panel.display
+
+    def action_toggle_vars(self) -> None:
+        """F2: the variable explorer — what's live in the kernel right now."""
+        table = self.main_screen.query_one("#vars-table", DataTable)
+        table.display = not table.display
+        if table.display:
+            self._refresh_vars()
+
+    def _refresh_vars(self) -> None:
+        table = self.main_screen.query_one("#vars-table", DataTable)
+        if table.display:
+            self.run_worker(self._refresh_vars_worker(), group="vars", exclusive=True)
+
+    async def _refresh_vars_worker(self) -> None:
+        rows = await asyncio.to_thread(kernel.list_variables)
+        table = self.main_screen.query_one("#vars-table", DataTable)
+        table.clear()
+        for name, vtype, shape, value in sorted(rows):
+            table.add_row(name, vtype, shape, value)
+        table.border_title = f"Kernel variables ({len(rows)}) — F2 to hide"
+
+    async def action_fix_error(self) -> None:
+        """Ctrl+F: send the last failed run to the tutor as a debugging
+        request (code + the tail of the traceback, where the error is)."""
+        result = self.last_run_result
+        if result is None or not result.stderr.strip():
+            self.notify(
+                "No failed run to fix — run some code first (Ctrl+R).",
+                severity="warning",
+            )
+            return
+        code = self.main_screen.query_one("#code-editor", TextArea).text.strip()
+        # The tutor is about to see this exact code; don't re-attach it to
+        # the next typed question.
+        self._attached_code[self.current_lesson_id] = code
+        error = result.stderr.strip()[-ERROR_ATTACH_LIMIT:]
+        message = (
+            f"{FIX_ERROR_MESSAGE}\n\n"
+            f"My code:\n```python\n{code[:ATTACH_CODE_LIMIT]}\n```\n\n"
+            f"Error:\n```\n{error}\n```"
+        )
+        await self.send_to_tutor(message)
 
     def _flush_lesson_time(self, restart: bool = False) -> None:
         if self.lesson_start is not None and self.current_lesson_id:
@@ -865,6 +959,7 @@ class TutorApp(App):
             return
         self.notify("The tutor is inspecting your kernel...")
         result = await asyncio.to_thread(kernel.run_code, match.group(1).strip())
+        self._refresh_vars()
         output = (result.stdout + result.stderr).strip() or "(no output)"
         message = (
             "[auto] Your check ran in my kernel. Output:\n"
@@ -1030,6 +1125,7 @@ class TutorApp(App):
             self.notify("Restarting the IPython kernel...")
             await asyncio.to_thread(kernel.restart)
             self.main_screen.query_one("#code-output", RichLog).clear()
+            self._refresh_vars()
             self.notify("Kernel restarted — all variables cleared.")
         elif event.button.id == "plots-btn":
             if kernel.PLOTS_DIR.is_dir() and any(kernel.PLOTS_DIR.iterdir()):
@@ -1111,8 +1207,20 @@ class TutorApp(App):
                 write_line(name, rest)
         if not result.stdout and not result.stderr:
             output_log.write("[dim](no output)[/dim]")
+        # Saved figures render inline as unicode pixels; the saved-path
+        # line has already been printed above as a fallback pointer.
+        for path in SAVED_PLOT_RE.findall(result.stdout):
+            pixels = _plot_renderable(path, output_log.size.width - 4)
+            if pixels is not None:
+                output_log.write(pixels)
         status = "interrupted" if result.timed_out else "done"
         output_log.write(f"[dim][{status} in {time.monotonic() - started:.1f}s][/dim]")
+        if result.returncode != 0 and not result.timed_out and result.stderr.strip():
+            output_log.write(
+                "[red]✗ the run failed[/red][dim] — Ctrl+F sends the error "
+                "to the tutor for help[/dim]"
+            )
+        self._refresh_vars()
 
     async def send_code_output_to_tutor(self) -> None:
         code = self.main_screen.query_one("#code-editor", TextArea).text

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import json
 import os
 import queue
 import re
@@ -41,6 +42,35 @@ if "matplotlib" in _sys.modules:
 """
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Runs silently in the kernel to inventory the student's variables for the
+# variable explorer. Underscored temps and non-data names (modules,
+# functions, IPython plumbing) are filtered out; one marker line of JSON
+# comes back on stdout.
+_VARS_SNIPPET = """\
+import json as _qt_json
+_qt_rows = []
+for _qt_k, _qt_v in list(globals().items()):
+    if _qt_k.startswith('_') or _qt_k in ('In', 'Out', 'exit', 'quit', 'get_ipython', 'open'):
+        continue
+    _qt_t = type(_qt_v).__name__
+    if _qt_t in ('module', 'function', 'type', 'ABCMeta',
+                 'builtin_function_or_method', 'method'):
+        continue
+    try:
+        _qt_shape = getattr(_qt_v, 'shape', None)
+        _qt_shape = str(_qt_shape) if _qt_shape is not None else (
+            str(len(_qt_v)) if hasattr(_qt_v, '__len__') else '')
+    except Exception:
+        _qt_shape = ''
+    try:
+        _qt_r = repr(_qt_v).replace('\\n', ' ')
+        _qt_r = _qt_r[:64] + ('…' if len(_qt_r) > 64 else '')
+    except Exception:
+        _qt_r = '<unrepresentable>'
+    _qt_rows.append((_qt_k, _qt_t, _qt_shape, _qt_r))
+print('QTVARS::' + _qt_json.dumps(_qt_rows))
+"""
 
 
 @dataclass
@@ -155,6 +185,24 @@ def _execute(code: str, timeout: float, on_output=None) -> RunResult:
         timed_out=timed_out,
         returncode=0 if ok and not timed_out else 1,
     )
+
+
+def list_variables() -> list[tuple[str, str, str, str]]:
+    """Inventory the kernel's user-defined variables for the explorer.
+
+    Returns (name, type, shape, value) rows; empty on any failure or if the
+    kernel isn't running (the explorer must never break the app). Blocking --
+    call via a thread. Skips the plot epilogue: inspection draws nothing.
+    """
+    with _lock:
+        if _km is None or not _km.is_alive():
+            return []
+        result = _execute(_VARS_SNIPPET, 15)
+    for line in result.stdout.splitlines():
+        if line.startswith("QTVARS::"):
+            with contextlib.suppress(Exception):
+                return [tuple(r) for r in json.loads(line[len("QTVARS::"):])]
+    return []
 
 
 def restart() -> None:

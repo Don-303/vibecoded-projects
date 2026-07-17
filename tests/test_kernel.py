@@ -59,3 +59,19 @@ def test_output_streams_via_callback():
     streamed = "".join(text for _, text in chunks)
     assert "line 0" in streamed and "line 2" in streamed
     assert result.stdout  # full output still returned
+
+
+def test_list_variables_inventories_the_namespace():
+    kernel.run_code("import numpy as np\nxs = np.arange(6).reshape(2, 3)\nnote = 'hi'")
+    rows = {name: (vtype, shape) for name, vtype, shape, _value in kernel.list_variables()}
+    assert rows["xs"] == ("ndarray", "(2, 3)")
+    assert rows["note"] == ("str", "2")
+    # modules and underscored temps are filtered out, and the inventory
+    # itself leaves nothing behind in the namespace
+    assert "np" not in rows
+    assert not any(name.startswith("_qt_") for name in rows)
+
+
+def test_list_variables_without_kernel_is_empty():
+    kernel.shutdown()
+    assert kernel.list_variables() == []

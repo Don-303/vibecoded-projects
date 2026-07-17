@@ -73,9 +73,16 @@ starting the app.
   real tracebacks. Output streams into the pane live as it's printed
   (training loops show progress per epoch), ending with a run-time line.
   "Restart" wipes the kernel's variables. Then "Send output to tutor" to
-  get the run reviewed. Matplotlib figures are saved to `data/plots/`
+  get the run reviewed. Matplotlib figures render inline in the output
+  pane as unicode pixel graphics and are also saved to `data/plots/`
   (the "Plots" button opens the folder in your image viewer). A Stop
   button cancels a slow tutor reply.
+- F2 opens the variable explorer: a live table of the kernel's variables
+  (name, type, shape, value) that refreshes after every run — see at a
+  glance what you've defined and whether that DataFrame has the shape
+  you think it has. If a run fails, Ctrl+F sends your code and the
+  traceback straight to the tutor as a debugging request (it coaches you
+  through the fix rather than rewriting your code for you).
 - The tutor interacts with your environment: questions you type
   automatically include your editor code (when it changed since the tutor
   last saw it), and the tutor can run a small inspection snippet in your
