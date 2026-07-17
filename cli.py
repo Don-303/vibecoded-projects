@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.version:
-        print("QuantLab 1.4.1")
+        print("QuantLab 1.4.2")
         return 0
 
     if args.notebook_dir:

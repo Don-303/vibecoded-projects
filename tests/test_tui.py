@@ -188,3 +188,29 @@ def test_panels_and_modals():
             await pilot.press("f2")
 
     asyncio.run(run())
+
+
+def test_switch_notebook_prompts_on_unsaved_changes():
+    """Regression: Ctrl+O with unsaved edits must prompt instead of silently
+    discarding them (same data-loss class as the v1.4.1 quit bug)."""
+    from tui import ConfirmQuitScreen, NotebookPanel, QuantLabApp
+
+    async def run():
+        app = QuantLabApp(notebook=DEMO)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _boot(app)
+            app.query_one(NotebookPanel).focus()
+            app.set_dirty()
+            proceeded = []
+            app._confirm_discard("switch", lambda: proceeded.append(True))
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmQuitScreen)
+            await pilot.press("escape")           # cancel keeps everything
+            assert not proceeded
+            app._confirm_discard("switch", lambda: proceeded.append(True))
+            await pilot.pause()
+            await pilot.press("q")                # explicit discard proceeds
+            assert proceeded
+            app.set_dirty(False)
+
+    asyncio.run(run())

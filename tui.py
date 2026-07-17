@@ -54,6 +54,27 @@ from core import (
 
 CODE_BLOCK_RE = re.compile(r"```(?:python|py)?\n(.*?)```", re.S)
 
+# Compiling the tree-sitter highlight query costs ~20ms and Textual redoes it
+# from scratch twice per TextArea — ~2.4s of a 60-cell notebook load, all
+# producing the identical Query. Textual caches Language objects per name, so
+# the compiled Query can be shared safely (execution uses a fresh QueryCursor).
+try:
+    from textual.document._syntax_aware_document import SyntaxAwareDocument
+
+    _QUERY_CACHE: Dict[tuple, Any] = {}
+    _orig_prepare_query = SyntaxAwareDocument.prepare_query
+
+    def _cached_prepare_query(self, query: str):  # type: ignore[no-untyped-def]
+        key = (id(self.language), query)
+        if key not in _QUERY_CACHE:
+            # store the Language too so its id can't be recycled
+            _QUERY_CACHE[key] = (_orig_prepare_query(self, query), self.language)
+        return _QUERY_CACHE[key][0]
+
+    SyntaxAwareDocument.prepare_query = _cached_prepare_query
+except Exception:  # pragma: no cover - tree-sitter not installed
+    pass
+
 # Runs silently inside the kernel to inventory user variables for the
 # variable explorer (F2). Underscore-prefixed temps are filtered back out.
 VARS_SNIPPET = """\
@@ -242,6 +263,10 @@ class CellWidget(Vertical):
         self.queued = False
         self.duration: Optional[float] = None
         self.output_collapsed = False
+        # rendered-plot cache: refresh_outputs re-renders every output (each
+        # 0.2s streaming tick, collapse toggles…) — decode/resize/rasterise
+        # each figure once per (content, width) instead of every refresh
+        self._img_cache: Dict[tuple, Any] = {}
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="cell-row"):
@@ -362,12 +387,21 @@ class CellWidget(Vertical):
             from PIL import Image
             from rich_pixels import Pixels
 
-            raw = base64.b64decode("".join(b64) if isinstance(b64, list) else b64)
-            img = Image.open(io.BytesIO(raw)).convert("RGB")
+            b64s = "".join(b64) if isinstance(b64, list) else b64
             max_w = max(40, min(self.app.size.width // 2 - 14, 110))
+            key = (hash(b64s), len(b64s), max_w)
+            cached = self._img_cache.get(key)
+            if cached is not None:
+                return cached
+            raw = base64.b64decode(b64s)
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
             ratio = max_w / img.width
             img = img.resize((max_w, max(1, int(img.height * ratio))))
-            return Pixels.from_image(img)
+            pixels = Pixels.from_image(img)
+            if len(self._img_cache) > 16:
+                self._img_cache.clear()
+            self._img_cache[key] = pixels
+            return pixels
         except Exception:
             return Text("[matplotlib figure — save & open in Jupyter/GUI to view]",
                         style="italic cyan")
@@ -593,17 +627,23 @@ class ModelPickerScreen(ModalScreen[Optional[str]]):
 
 
 class ConfirmQuitScreen(ModalScreen[str]):
-    """Shown when quitting with unsaved changes."""
+    """Shown when an action (quit, switch notebook…) would discard unsaved
+    changes."""
 
     BINDINGS = [
-        Binding("s", "dismiss('save')", "save & quit"),
-        Binding("q", "dismiss('quit')", "quit without saving"),
+        Binding("s", "dismiss('save')", "save & continue"),
+        Binding("q", "dismiss('quit')", "discard changes"),
         Binding("escape", "dismiss('cancel')", "cancel"),
     ]
 
+    def __init__(self, verb: str = "quit") -> None:
+        super().__init__()
+        self.verb = verb
+
     def compose(self) -> ComposeResult:
         with Vertical(id="open-box"):
-            yield Label("Unsaved changes — [b]s[/b]ave & quit · [b]q[/b]uit without saving · "
+            yield Label(f"Unsaved changes — [b]s[/b]ave & {self.verb} · "
+                        f"[b]q[/b] {self.verb} without saving · "
                         "[b]Esc[/b] cancel", classes="modal-title")
 
 
@@ -811,9 +851,10 @@ class QuantLabApp(App[None]):
             for raw in raw_cells:
                 raw.setdefault("outputs", [])
                 raw.setdefault("execution_count", None)
-                w = CellWidget(raw)
-                self.cells.append(w)
-                await panel.mount(w)
+                self.cells.append(CellWidget(raw))
+            # one batched mount = one layout pass; per-cell awaits made a
+            # 60-cell notebook take ~3.6s to open
+            await panel.mount(*self.cells)
             self.selected = 0
             self.mode = "command"
             self.refresh_selection()
@@ -1036,6 +1077,10 @@ class QuantLabApp(App[None]):
         else:
             await self.execute_cell_widget(w)
         if advance:
+            # cells may have been inserted/deleted while the run awaited —
+            # re-derive the position from the widget, not the saved index
+            if w in self.cells:
+                index = self.cells.index(w)
             if index + 1 >= len(self.cells):
                 await self.insert_cell(len(self.cells), "code")
             self.enter_command_mode()
@@ -1129,9 +1174,10 @@ class QuantLabApp(App[None]):
                 "notebook — ask about any cell, press `e` on a cell for a review, "
                 "or `f` on a failed cell to debug it.", classes="chat-ai"))
             return
-        for msg in self.chat_history:
-            cls = "chat-user" if msg["role"] == "user" else "chat-ai"
-            await log.mount(Markdown(msg["content"], classes=cls))
+        await log.mount(*(
+            Markdown(msg["content"],
+                     classes="chat-user" if msg["role"] == "user" else "chat-ai")
+            for msg in self.chat_history))
         log.scroll_end(animate=False)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -1393,7 +1439,8 @@ class QuantLabApp(App[None]):
                 return
             self.call_later(self.load_notebook, path)
             self.notify(f"Strategy scaffold created: {path}", timeout=3)
-        self.push_screen(NewNotebookScreen(), _create)
+        self._confirm_discard(
+            "switch", lambda: self.push_screen(NewNotebookScreen(), _create))
 
     def action_search(self) -> None:
         for w in self.cells:
@@ -1493,7 +1540,8 @@ class QuantLabApp(App[None]):
     def action_open_notebook(self) -> None:
         def _open(path: Optional[str]) -> None:
             if path and path != self.nb_path:
-                self.call_later(self.load_notebook, path)
+                self._confirm_discard(
+                    "switch", lambda: self.call_later(self.load_notebook, path))
         self.push_screen(OpenScreen(), _open)
 
     def action_new_notebook(self) -> None:
@@ -1506,20 +1554,27 @@ class QuantLabApp(App[None]):
                 self.notify(f"Create failed: {exc}", severity="error")
                 return
             self.call_later(self.load_notebook, path)
-        self.push_screen(NewNotebookScreen(), _create)
+        self._confirm_discard(
+            "switch", lambda: self.push_screen(NewNotebookScreen(), _create))
 
-    def action_request_quit(self) -> None:
+    def _confirm_discard(self, verb: str, proceed) -> None:
+        """Run `proceed` immediately if there are no unsaved changes, else
+        prompt save/discard/cancel first (quit, Ctrl+O/N/G all route here —
+        switching notebooks used to silently drop unsaved edits)."""
         if not self.dirty:
-            self.exit()
+            proceed()
             return
 
         def _decide(choice: str) -> None:
             if choice == "save":
-                if self.action_save():  # stay open if the save failed
-                    self.exit()
+                if self.action_save():  # stay put if the save failed
+                    proceed()
             elif choice == "quit":
-                self.exit()
-        self.push_screen(ConfirmQuitScreen(), _decide)
+                proceed()
+        self.push_screen(ConfirmQuitScreen(verb), _decide)
+
+    def action_request_quit(self) -> None:
+        self._confirm_discard("quit", self.exit)
 
     async def on_unmount(self) -> None:
         await asyncio.to_thread(kernel_service.shutdown)
