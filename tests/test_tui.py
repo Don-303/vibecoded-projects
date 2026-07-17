@@ -130,6 +130,28 @@ def test_delete_cell_mid_run_does_not_crash():
     asyncio.run(run())
 
 
+def test_typing_marks_dirty():
+    """Regression: unsaved typing must set the dirty flag, or quitting skips
+    the save prompt and autosave never fires (silent data loss)."""
+    from tui import NotebookPanel, QuantLabApp
+
+    async def run():
+        app = QuantLabApp(notebook=DEMO)
+        async with app.run_test(size=(160, 50)) as pilot:
+            await _boot(app)
+            assert not app.dirty, "loading a notebook must not mark it dirty"
+            app.query_one(NotebookPanel).focus()
+            await pilot.press("j", "enter")   # edit first code cell
+            await pilot.press("z")            # type one character
+            await pilot.pause()
+            assert app.dirty, "typing in a cell must mark the notebook dirty"
+            # undo the typed char so the demo notebook stays pristine
+            await pilot.press("ctrl+z")
+            await pilot.press("escape")
+
+    asyncio.run(run())
+
+
 def test_panels_and_modals():
     from textual.widgets import DataTable
     from tui import ChatInput, HelpScreen, NotebookPanel, QuantLabApp

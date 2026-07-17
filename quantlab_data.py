@@ -63,8 +63,10 @@ def load_index(key: str, start: Optional[str] = None,
 
 def closes(*keys: str, start: Optional[str] = None,
            end: Optional[str] = None) -> pd.DataFrame:
-    """Wide panel of close prices (one column per index), inner-aligned on
-    business days where every requested index traded."""
+    """Wide panel of close prices (one column per index), outer-aligned on
+    the union of trading days: an index that didn't trade on a given day
+    shows NaN. Rows where *no* index traded are dropped. Use `.dropna()` on
+    the result if you need only days where every index traded."""
     keys = keys or tuple(sorted(p.stem for p in DATA_DIR.glob("*.csv")))
     panel = pd.DataFrame({k: load_index(k, start, end)["Close"] for k in keys})
     return panel.dropna(how="all")

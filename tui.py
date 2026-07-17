@@ -699,6 +699,7 @@ class QuantLabApp(App[None]):
         self._last_autosave = 0.0
         self.agent_active = False
         self.agent_stop = False
+        self._loading_notebook = False
 
     # -- layout ------------------------------------------------------------
 
@@ -795,48 +796,60 @@ class QuantLabApp(App[None]):
     # -- notebook load / save ----------------------------------------------
 
     async def load_notebook(self, rel_path: str) -> None:
-        data = load_notebook_file(rel_path)
-        switching = self.nb_path is not None and rel_path != self.nb_path
-        self.nb_path = rel_path
-        if switching and kernel_service.kernel_id is not None:
-            self.switch_kernel_worker(rel_path)
-        panel = self.query_one(NotebookPanel)
-        await panel.remove_children()
-        self.cells = []
-        raw_cells = data["cells"] or [{"cell_type": "code", "source": "", "outputs": [],
-                                       "execution_count": None}]
-        for raw in raw_cells:
-            raw.setdefault("outputs", [])
-            raw.setdefault("execution_count", None)
-            w = CellWidget(raw)
-            self.cells.append(w)
-            await panel.mount(w)
-        self.selected = 0
-        self.mode = "command"
-        self.refresh_selection()
-        self.chat_history = list(data.get("chat") or [])
-        await self.replay_chat()
+        self._loading_notebook = True
+        try:
+            data = load_notebook_file(rel_path)
+            switching = self.nb_path is not None and rel_path != self.nb_path
+            self.nb_path = rel_path
+            if switching and kernel_service.kernel_id is not None:
+                self.switch_kernel_worker(rel_path)
+            panel = self.query_one(NotebookPanel)
+            await panel.remove_children()
+            self.cells = []
+            raw_cells = data["cells"] or [{"cell_type": "code", "source": "", "outputs": [],
+                                           "execution_count": None}]
+            for raw in raw_cells:
+                raw.setdefault("outputs", [])
+                raw.setdefault("execution_count", None)
+                w = CellWidget(raw)
+                self.cells.append(w)
+                await panel.mount(w)
+            self.selected = 0
+            self.mode = "command"
+            self.refresh_selection()
+            self.chat_history = list(data.get("chat") or [])
+            await self.replay_chat()
+        finally:
+            self._loading_notebook = False
         self.set_dirty(False)
         self.update_topbar()
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """Typing in any cell editor marks the notebook dirty — without this,
+        edits that are never run would quit without the save prompt and never
+        trigger autosave (silent data loss)."""
+        if not self._loading_notebook:
+            self.set_dirty()
 
     def snapshot_cells(self) -> List[Dict[str, Any]]:
         for w in self.cells:
             w.sync_source()
         return [dict(w.cell) for w in self.cells]
 
-    def action_save(self, quiet: bool = False) -> None:
+    def action_save(self, quiet: bool = False) -> bool:
         if not self.nb_path:
-            return
+            return False
         try:
             n = save_notebook_file(self.nb_path, self.snapshot_cells(), self.chat_history)
         except Exception as exc:  # noqa: BLE001
             self.notify(f"Save failed: {exc}", severity="error")
-            return
+            return False
         self.set_dirty(False)
         if quiet:
             self.notify(f"Autosaved {self.nb_path}", timeout=1.5, severity="information")
         else:
             self.notify(f"Saved {self.nb_path} ({n} cells)", timeout=3)
+        return True
 
     # -- selection / modes ---------------------------------------------------
 
@@ -1502,8 +1515,8 @@ class QuantLabApp(App[None]):
 
         def _decide(choice: str) -> None:
             if choice == "save":
-                self.action_save()
-                self.exit()
+                if self.action_save():  # stay open if the save failed
+                    self.exit()
             elif choice == "quit":
                 self.exit()
         self.push_screen(ConfirmQuitScreen(), _decide)

@@ -747,9 +747,20 @@ async function sendChat(userText) {
   try {
     // include the live notebook so the mentor can read every cell + output
     for (const c of nb.cells) { if (editors[c.id]) c.source = editors[c.id].getValue(); }
+    // slim outputs: drop image base64 + html (the model only reads text) so
+    // plot-heavy notebooks don't ship megabytes with every chat message
+    const slimOutputs = (outs) => (outs || []).map(o => {
+      if ((o.output_type === "execute_result" || o.output_type === "display_data") && o.data) {
+        const d = { ...o.data };
+        if (d["image/png"]) d["image/png"] = "";   // empty marker → "figure rendered"
+        delete d["text/html"];
+        return { ...o, data: d };
+      }
+      return o;
+    });
     const cellsCtx = nb.cells.map(c => ({
       cell_type: c.cell_type, source: c.source,
-      execution_count: c.execution_count, outputs: c.outputs || [],
+      execution_count: c.execution_count, outputs: slimOutputs(c.outputs),
     }));
     const resp = await fetch("/api/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
