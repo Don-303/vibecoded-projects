@@ -112,6 +112,17 @@ reversal on the DAX"), then press `Ctrl+E` on its reply — QuantLab inserts the
 code, runs it, and sends the result back so the mentor proposes the next step.
 One keypress per iteration; you stay in control.
 
+**Autonomous agent mode:** type `/auto <goal>` in the chat (or press `F6`) and
+the mentor plans, writes cells, runs them, reads results, and iterates on its
+own — up to 8 steps, deduplicating repeated code and stopping on DONE. Press
+`F6` again to stop it. All cells it produced stay in the notebook for review.
+
+**Live streaming output:** long-running cells (training loops, sweeps) stream
+their stdout into the cell *while running* instead of dumping it at the end.
+
+**Collapsible chat:** `F4` hides/shows the AI panel for full-width notebook
+work; `Ctrl+L` brings it back and focuses the input.
+
 **Per-notebook kernels:** each notebook gets its own kernel. `Ctrl+O` to
 another notebook starts (or resumes) that notebook's interpreter — variables
 never bleed between projects, and switching back restores your state.
@@ -219,7 +230,18 @@ Refresh the snapshot when you're online:
 .venv/bin/python download_data.py sp500 vix  # just a subset
 ```
 
-## 5. Notes
+## 5. Tests
+
+```bash
+.venv/bin/pytest tests/          # full suite
+.venv/bin/pytest tests/test_core.py tests/test_tui.py   # fast, no AI needed
+```
+
+`tests/test_ai.py` exercises the live Ollama chat and the autonomous agent;
+those tests skip automatically when Ollama isn't running (and are slow —
+minutes, not seconds — since they use the real local model).
+
+## 6. Notes
 
 - Files saved through the app are validated with `nbformat.validate()` before
   writing, so they always remain openable by JupyterLab/VS Code.
