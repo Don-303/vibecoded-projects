@@ -112,3 +112,17 @@ def test_fit_history_cut_is_stable_as_history_grows():
     grown = history + _turns(2, chars=200)
     after = agent._fit_history(grown)
     assert after[: len(before)] == before
+
+
+def test_build_import_block_includes_filename_and_content():
+    block = agent.build_import_block("demo.ipynb", "x = 1\nprint(x)")
+    assert "demo.ipynb" in block
+    assert "x = 1\nprint(x)" in block
+    assert "write it themselves" in block
+
+
+def test_build_import_block_truncates_over_budget():
+    long_content = "a" * (agent.IMPORT_BUDGET_CHARS + 500)
+    block = agent.build_import_block("big.ipynb", long_content)
+    assert "(truncated)" in block
+    assert len(block) < len(long_content) + 200

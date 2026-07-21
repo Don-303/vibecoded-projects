@@ -213,6 +213,43 @@ def system_prompt(lesson: Lesson, extra_block: str = "", skill_name: str | None 
     return prompt + extra_block
 
 
+IMPORT_LESSON_TEMPLATE = """
+
+The student uploaded a real Jupyter notebook because they want to learn to \
+write it themselves, not just have it explained. Its full content (code and \
+markdown cells, in order) is below. Do not hand them this code: first give a \
+brief overview of what the notebook accomplishes and how it's structured, \
+then walk them through writing it themselves one small piece at a time -- \
+skeleton code with TODOs for the next section, checking their attempt \
+against the real cell before revealing more and moving on. Use the \
+conversation history to judge how far through the notebook you've already \
+gotten.
+
+=== {filename} ===
+{content}
+"""
+
+# Smaller than SOURCE_BUDGET_CHARS: an import is a single document (no
+# splitting across sources), so one generous budget is simpler than a
+# per-source share.
+IMPORT_BUDGET_CHARS = 6000
+
+# Sent on the student's behalf right after a successful import.
+IMPORT_START_MESSAGE = (
+    "I uploaded this notebook because I want to learn how to write it "
+    "myself. Give me a brief overview of what it does and how it's "
+    "structured, then start walking me through writing it -- the first "
+    "small piece as an exercise."
+)
+
+
+def build_import_block(filename: str, content: str) -> str:
+    text = content[:IMPORT_BUDGET_CHARS]
+    if len(content) > IMPORT_BUDGET_CHARS:
+        text += "\n# ... (truncated)"
+    return IMPORT_LESSON_TEMPLATE.format(filename=filename, content=text)
+
+
 def _build_reference_block(chunks: list[rag.Chunk]) -> str:
     if not chunks:
         return ""

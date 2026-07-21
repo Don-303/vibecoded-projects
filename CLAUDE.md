@@ -72,6 +72,25 @@ to the local instance regardless of that env var.
   cached so the prompt stays byte-identical (prefix-cache requirement).
   exam-blueprint and flashcard-deck shape the Quiz/Cards button messages
   in `app/main.py` (sent as user messages, so no cache invalidation).
+- Notebook import (Ctrl+U / "Import notebook..." in `app/main.py`): the
+  student points at any `.ipynb` on disk; `_ipynb_to_cells` pulls its
+  code/markdown cells (dropping raw cells and outputs) and
+  `notebook.cells_to_script` renders them into the same percent-script
+  text used for persistence. A `curriculum.Lesson` is synthesized on the
+  fly (`_import_lesson`, module_id "imported-notebooks" so no
+  MODULE_SKILLS auto-skill applies) with an id derived from a content
+  hash of that script -- re-importing the identical file resumes the
+  same history instead of starting over. `TutorApp._adhoc_lessons` holds
+  these (not in syllabus.yaml, so `curriculum.find_lesson` can't see
+  them); `TutorApp._find_lesson` checks both. The notebook's own content
+  becomes the tutor's grounding material by pre-seeding
+  `agent._lesson_block_cache[lesson.id]` with `agent.build_import_block`
+  (same memoization path sourced lessons use, so it stays
+  prefix-cacheable) instructing a walk-through-not-dump teaching style;
+  the editor itself starts blank so the student writes the
+  reproduction, and `agent.IMPORT_START_MESSAGE` (passed through
+  `load_lesson`'s new `start_message` param) kicks off the first reply
+  instead of the generic `AUTO_START_MESSAGE`.
 - `app/rag.py` — the corpus registry (`SOURCES`), the local embedding index
   (`retrieve()`, backed by `nomic-embed-text` + a numpy cosine-similarity
   search over `data/rag_index/`), and full-lecture-text loading

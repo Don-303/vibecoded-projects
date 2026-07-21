@@ -99,6 +99,13 @@ starting the app.
   with the output fed back to it automatically, so "verify my solution"
   is checked against reality rather than guessed at. One check per
   message, always visible in the chat.
+- Ctrl+U (or the "Import notebook..." button in the sidebar) lets you
+  point at any `.ipynb` file on disk. Your notebook panel starts blank —
+  the tutor gives a brief overview of what the uploaded notebook does,
+  then walks you through writing it yourself, one small exercise at a
+  time, checking your attempt against the real cells as you go rather
+  than handing you the code. Re-importing the same file resumes the
+  same walkthrough where you left off.
 - Mark a lesson complete and move to the next one (Ctrl+N) when ready.
   The app reopens on whatever lesson you had open last session, and
   Ctrl+D jumps straight to the next lesson due for review.

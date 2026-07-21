@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import re
 import subprocess
 import time
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -32,7 +35,7 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 
 from app import __version__, agent, curriculum, kernel, progress, rag, theming
-from app.notebook import NotebookEditor
+from app.notebook import NotebookEditor, cells_to_script
 
 DEFAULT_LESSON_ID = "py-core"
 
@@ -52,6 +55,7 @@ HELP_TEXT = f"""\
 | Ctrl+F | Send the last failed run's error to the tutor for help |
 | F1 | This help |
 | F2 | Variable explorer (live kernel variables: name/type/shape/value) |
+| Ctrl+U | Import a .ipynb notebook for the tutor to walk you through |
 | Ctrl+Q | Quit |
 
 ## Notebook keys (Jupyter-style)
@@ -105,6 +109,14 @@ to verify your work against your actual variables.
 
 The tutor style selector (header) switches how it teaches this lesson:
 standard, Socratic questioning, or layered explanations.
+
+## Importing a notebook
+Ctrl+U (or the "Import" button) lets you point at any .ipynb file on
+disk. Your notebook panel starts blank -- the tutor gives you a brief
+overview of what the uploaded notebook does, then walks you through
+writing it yourself, one small exercise at a time, checking your
+attempt against the real cells as you go. Re-importing the same file
+resumes where you left off.
 """
 
 # Tutor styles: teaching-skill playbooks (skills/, from DeepTutor's EduHub)
@@ -173,6 +185,34 @@ PROJECT_MESSAGE = (
 )
 
 
+def _ipynb_to_cells(raw: dict) -> list[dict]:
+    """Pull code/markdown cells out of a parsed .ipynb (raw nbformat JSON),
+    dropping raw cells and outputs -- only the source matters for teaching."""
+    cells = []
+    for cell in raw.get("cells", []):
+        cell_type = cell.get("cell_type")
+        if cell_type not in ("code", "markdown"):
+            continue
+        source = cell.get("source", "")
+        source = "".join(source) if isinstance(source, list) else source
+        if source.strip():
+            cells.append({"cell_type": cell_type, "source": source})
+    return cells
+
+
+def _import_lesson(path: Path, digest: str) -> curriculum.Lesson:
+    """A lesson id derived from the notebook's content hash, so re-importing
+    the identical file resumes the same walkthrough (same history) instead
+    of starting over."""
+    slug = re.sub(r"[^a-z0-9]+", "-", path.stem.lower()).strip("-") or "notebook"
+    return curriculum.Lesson(
+        id=f"import-{slug}-{digest}",
+        title=f"Imported: {path.name}",
+        module_id="imported-notebooks",
+        module_title="Imported notebook",
+    )
+
+
 class ModelPicker(ModalScreen[str]):
     """Model chooser: the catalog with one-line descriptions and install
     status. Enter selects; the preselected entry is the current/last-used
@@ -210,6 +250,34 @@ class ModelPicker(ModalScreen[str]):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.id)
+
+
+class ImportScreen(ModalScreen[str]):
+    """Ctrl+U: type or paste a path to a .ipynb file to import. Enter
+    submits; the caller decides what a blank result means (cancelled)."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def action_cancel(self) -> None:
+        self.dismiss("")
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="import-dialog"):
+            yield Static("[b]Import a Jupyter notebook[/b]", id="import-title")
+            yield Static(
+                "[dim]The tutor will explain it, then walk you through "
+                "writing it yourself -- your notebook panel starts "
+                "blank.[/dim]",
+                id="import-subtitle",
+            )
+            yield Input(placeholder="~/path/to/notebook.ipynb", id="import-path")
+            yield Static("[dim]Enter to import · Escape to cancel[/dim]", id="import-hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#import-path", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
 
 
 class HelpScreen(ModalScreen[None]):
@@ -321,8 +389,21 @@ class TutorApp(App):
         display: none;
         border-top: solid $accent;
     }
-    ModelPicker, HelpScreen, ConfirmScreen {
+    ModelPicker, HelpScreen, ConfirmScreen, ImportScreen {
         align: center middle;
+    }
+    #import-dialog {
+        width: 70;
+        height: auto;
+        border: thick $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #import-subtitle {
+        margin-bottom: 1;
+    }
+    #import-hint {
+        padding-top: 1;
     }
     #help-dialog {
         width: 80;
@@ -380,6 +461,7 @@ class TutorApp(App):
         ("f1", "show_help", "Help"),
         ("f2", "toggle_vars", "Vars"),
         ("ctrl+f", "fix_error", "Fix error"),
+        ("ctrl+u", "import_notebook", "Import notebook"),
     ]
 
     @property
@@ -393,6 +475,11 @@ class TutorApp(App):
     @property
     def notebook(self) -> NotebookEditor:
         return self.main_screen.query_one("#notebook", NotebookEditor)
+
+    def _find_lesson(self, lesson_id: str) -> curriculum.Lesson | None:
+        """Curriculum lessons plus this session's imported notebooks (which
+        aren't in syllabus.yaml, so curriculum.find_lesson can't see them)."""
+        return curriculum.find_lesson(lesson_id) or self._adhoc_lessons.get(lesson_id)
 
     def __init__(self) -> None:
         super().__init__()
@@ -412,6 +499,9 @@ class TutorApp(App):
         # Which lesson's code currently occupies the editor -- None until the
         # first load so app start can't clobber saved code with an empty buffer.
         self._code_loaded_for: str | None = None
+        # Lessons synthesized from an imported .ipynb -- not in curriculum.yaml,
+        # so they need their own lookup (see _find_lesson).
+        self._adhoc_lessons: dict[str, curriculum.Lesson] = {}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -419,6 +509,11 @@ class TutorApp(App):
             with Vertical(id="sidebar"):
                 yield Input(placeholder="Filter lessons...", id="lesson-filter")
                 yield Tree("Curriculum", id="curriculum-tree")
+                yield Button(
+                    "Import notebook...", id="import-btn", compact=True,
+                    tooltip="Upload a .ipynb file (Ctrl+U): the tutor explains "
+                    "it and walks you through writing it yourself",
+                )
             with Vertical():
                 with Horizontal(id="header-row"):
                     yield Static("", id="lesson-header")
@@ -651,7 +746,7 @@ class TutorApp(App):
         # Load the new model and prefill the current lesson's prompt so the
         # next message doesn't pay cold-load + full prefill back to back.
         await agent.warm_up()
-        lesson = curriculum.find_lesson(self.current_lesson_id)
+        lesson = self._find_lesson(self.current_lesson_id)
         if lesson:
             self.run_worker(
                 self._prewarm_worker(lesson), group="prefix-warm", exclusive=True
@@ -729,6 +824,44 @@ class TutorApp(App):
         self._refresh_vars()
         self.notify("Kernel restarted — all variables cleared.")
 
+    def action_import_notebook(self) -> None:
+        self.run_worker(self._import_notebook_flow(), group="import", exclusive=True)
+
+    async def _import_notebook_flow(self) -> None:
+        path_str = await self.push_screen_wait(ImportScreen())
+        if path_str:
+            await self._import_notebook(path_str)
+
+    async def _import_notebook(self, path_str: str) -> None:
+        path = Path(path_str).expanduser()
+        if path.suffix != ".ipynb" or not path.is_file():
+            self.notify(f"Not a readable .ipynb file: {path}", severity="error")
+            return
+        try:
+            raw = json.loads(path.read_text())
+            cells = _ipynb_to_cells(raw)
+        except Exception as exc:
+            self.notify(f"Could not parse notebook: {exc}", severity="error")
+            return
+        if not cells:
+            self.notify(
+                "That notebook has no readable code/markdown cells.",
+                severity="warning",
+            )
+            return
+        script = cells_to_script(cells)
+        digest = hashlib.sha1(script.encode()).hexdigest()[:8]
+        lesson = _import_lesson(path, digest)
+        self._adhoc_lessons[lesson.id] = lesson
+        # Pre-seed the prefix-cache block with the notebook's own content
+        # instead of the source-lecture/RAG lookup _lesson_extra_block would
+        # otherwise do for an unrecognized lesson id.
+        agent._lesson_block_cache.setdefault(
+            lesson.id, agent.build_import_block(path.name, script)
+        )
+        self.notify(f"Imported {path.name} — starting the walkthrough...")
+        self.load_lesson(lesson.id, start_message=agent.IMPORT_START_MESSAGE)
+
     def _flush_lesson_time(self, restart: bool = False) -> None:
         if self.lesson_start is not None and self.current_lesson_id:
             elapsed = time.monotonic() - self.lesson_start
@@ -790,8 +923,10 @@ class TutorApp(App):
         if lesson_id:
             self.load_lesson(lesson_id)
 
-    def load_lesson(self, lesson_id: str) -> None:
-        lesson = curriculum.find_lesson(lesson_id)
+    def load_lesson(
+        self, lesson_id: str, start_message: str = agent.AUTO_START_MESSAGE
+    ) -> None:
+        lesson = self._find_lesson(lesson_id)
         if lesson is None:
             return
         self._flush_lesson_time()
@@ -834,7 +969,7 @@ class TutorApp(App):
             # so the canned opener doesn't clutter the visible history.
             chat_log.update("*Starting lesson...*")
             self.run_worker(
-                self.stream_tutor_reply(lesson, [], agent.AUTO_START_MESSAGE),
+                self.stream_tutor_reply(lesson, [], start_message),
                 group="tutor-stream",
                 exclusive=True,
             )
@@ -866,7 +1001,7 @@ class TutorApp(App):
         return f"{message}\n\nMy current editor code:\n```python\n{code[:ATTACH_CODE_LIMIT]}\n```"
 
     async def send_to_tutor(self, message: str, attach_editor: bool = False) -> None:
-        lesson = curriculum.find_lesson(self.current_lesson_id)
+        lesson = self._find_lesson(self.current_lesson_id)
         if lesson is None:
             return
         if attach_editor:
@@ -893,7 +1028,7 @@ class TutorApp(App):
         if skill_name == progress.get_teaching_skill(self.current_lesson_id):
             return
         progress.save_teaching_skill(self.current_lesson_id, skill_name)
-        lesson = curriculum.find_lesson(self.current_lesson_id)
+        lesson = self._find_lesson(self.current_lesson_id)
         if lesson:
             # The style changes the system prompt, so the prompt cache for
             # this lesson is stale -- prefill the new prefix in the background.
@@ -1082,7 +1217,9 @@ class TutorApp(App):
         return "\n".join(lines)
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "run-btn":
+        if event.button.id == "import-btn":
+            self.action_import_notebook()
+        elif event.button.id == "run-btn":
             await self.notebook.run_current()
         elif event.button.id == "run-all-btn":
             self.action_run_all()

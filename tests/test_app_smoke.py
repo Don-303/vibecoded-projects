@@ -1,12 +1,13 @@
 """Headless smoke tests for the Textual app with a mocked model."""
 import asyncio
+import json
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, patch
 
-from textual.widgets import Button, Select, Tree
+from textual.widgets import Button, Input, Select, Tree
 
 from app import agent, kernel, progress, theming
-from app.main import ModelPicker, TutorApp
+from app.main import ImportScreen, ModelPicker, TutorApp
 from app.notebook import NotebookEditor
 
 CANNED = 'Intro!\n```python\nprint(1 + 1)\n```\nReady?'
@@ -391,6 +392,115 @@ def test_plot_renderable_and_saved_plot_parsing(tmp_path):
     assert _plot_renderable(str(tmp_path / "missing.png"), max_width=60) is None
     stdout = f"some output\n[saved plot: {path}]\n"
     assert SAVED_PLOT_RE.findall(stdout) == [str(path)]
+
+
+def _write_sample_notebook(tmp_path):
+    nb = tmp_path / "demo.ipynb"
+    nb.write_text(json.dumps({
+        "cells": [
+            {"cell_type": "markdown", "source": ["# Demo\n", "a tiny notebook"]},
+            {"cell_type": "code", "source": ["x = 1\n", "print(x)\n"]},
+        ]
+    }))
+    return nb
+
+
+def test_import_notebook_starts_a_walkthrough(tmp_path):
+    nb = _write_sample_notebook(tmp_path)
+    seen_messages = []
+
+    async def capture_stream(lesson, history, user_message, skill_name=None):
+        seen_messages.append(user_message)
+        yield "Overview!\n```python\nx = 1\n```\nReady?"
+
+    async def scenario():
+        with _mocked_model(stream=capture_stream):
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                app.action_import_notebook()
+                await pilot.pause(0.3)
+                assert isinstance(app.screen, ImportScreen)
+                app.screen.query_one("#import-path", Input).value = str(nb)
+                await pilot.press("enter")
+                for _ in range(50):
+                    await pilot.pause(0.1)
+                    if "Overview!" in app.chat_buffer:
+                        break
+                assert "Overview!" in app.chat_buffer
+                assert app.current_lesson_id.startswith("import-demo-")
+                # the panel starts blank -- the student writes it themselves
+                assert app.notebook.to_script() == ""
+                # seen_messages[0] is py-core's own auto-start from launch;
+                # the import triggers a second, distinct auto-start message
+                assert agent.IMPORT_START_MESSAGE in seen_messages
+
+    asyncio.run(scenario())
+
+
+def test_import_notebook_cancelled_leaves_lesson_unchanged():
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                before = app.current_lesson_id
+                app.action_import_notebook()
+                await pilot.pause(0.3)
+                await pilot.press("escape")
+                await pilot.pause(0.2)
+                assert app.current_lesson_id == before
+
+    asyncio.run(scenario())
+
+
+def test_import_rejects_missing_or_invalid_file(tmp_path):
+    bad_json = tmp_path / "bad.ipynb"
+    bad_json.write_text("not json")
+
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                before = app.current_lesson_id
+                await app._import_notebook(str(tmp_path / "missing.ipynb"))
+                assert app.current_lesson_id == before
+                await app._import_notebook(str(bad_json))
+                assert app.current_lesson_id == before
+
+    asyncio.run(scenario())
+
+
+def test_reimporting_same_notebook_resumes_history(tmp_path):
+    nb = _write_sample_notebook(tmp_path)
+
+    async def scenario():
+        with _mocked_model():
+            app = TutorApp()
+            async with app.run_test(size=(140, 40)) as pilot:
+                await _pick_model(pilot)
+                await pilot.pause(0.3)
+                await app._import_notebook(str(nb))
+                for _ in range(50):
+                    await pilot.pause(0.1)
+                    if progress.get_history(app.current_lesson_id):
+                        break
+                first_id = app.current_lesson_id
+                history_len = len(progress.get_history(first_id))
+                assert history_len > 0
+
+                app.load_lesson("py-core")
+                await pilot.pause(0.2)
+                await app._import_notebook(str(nb))
+                await pilot.pause(0.2)
+                assert app.current_lesson_id == first_id
+                assert len(progress.get_history(first_id)) == history_len
+
+    asyncio.run(scenario())
 
 
 def test_tutor_check_runs_in_kernel_once():
