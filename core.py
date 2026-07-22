@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -432,6 +433,36 @@ def create_notebook(name: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     nbformat.write(nb, str(path))
     return path.relative_to(NOTEBOOK_DIR).as_posix()
+
+
+def import_notebook(src_path: str) -> str:
+    """Copy an external .ipynb (anywhere on disk, e.g. ~/Downloads/x.ipynb)
+    into NOTEBOOK_DIR and return its new relative path.
+
+    Notebooks are only ever opened/saved from inside NOTEBOOK_DIR (see
+    safe_notebook_path) — importing copies the file in rather than pointing
+    at it in place, so that sandboxing guarantee doesn't have to bend for
+    files the user picked from arbitrary locations.
+    """
+    src = Path(src_path).expanduser().resolve()
+    if not src.exists():
+        raise NotebookPathError(f"No such file: {src}")
+    if src.suffix != ".ipynb":
+        raise NotebookPathError("Only .ipynb files can be imported")
+    try:
+        nbformat.read(str(src), as_version=4)  # validate before copying in
+    except Exception as exc:
+        raise NotebookPathError(f"Not a valid notebook: {exc}") from exc
+
+    dest = safe_notebook_path(src.name)
+    if dest.exists():
+        stem, suffix, i = dest.stem, dest.suffix, 1
+        while dest.exists():
+            dest = safe_notebook_path(f"{stem}-{i}{suffix}")
+            i += 1
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
+    return dest.relative_to(NOTEBOOK_DIR).as_posix()
 
 
 def load_notebook_file(rel_path: str) -> Dict[str, Any]:

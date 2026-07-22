@@ -42,9 +42,11 @@ from core import (
     OLLAMA_MODEL,
     OLLAMA_TEMPERATURE,
     OLLAMA_URL,
+    NotebookPathError,
     build_chat_messages,
     create_notebook,
     expand_file_references,
+    import_notebook,
     kernel_service,
     list_notebooks,
     load_notebook_file,
@@ -124,6 +126,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("/", "search across all cells"),
         ("e", "ask AI to explain/review selected cell"),
         ("f", "ask AI to fix the selected cell's error"),
+        ("w", "walkthrough: run/render cell, AI narrates it, advance to next"),
         ("Ctrl+Y", "apply AI's last code block to selected cell"),
         ("Ctrl+E", "agent step: insert AI's code, run it, report back"),
     ]),
@@ -143,6 +146,7 @@ HELP_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("Ctrl+T", "switch AI chat model (installed Ollama models)"),
         ("Ctrl+O", "open another notebook"),
         ("Ctrl+N", "new (blank) notebook"),
+        ("F7", "import a .ipynb from anywhere on disk"),
         ("Ctrl+G", "new strategy scaffold (data+signal+costed backtest+report)"),
         ("? / F1", "this help"),
         ("Ctrl+Q", "quit"),
@@ -496,6 +500,24 @@ class NewNotebookScreen(ModalScreen[Optional[str]]):
         self.dismiss(event.value.strip() or None)
 
 
+class ImportScreen(ModalScreen[Optional[str]]):
+    """Pick an external .ipynb (anywhere on disk) to copy into QuantLab."""
+
+    BINDINGS = [Binding("escape", "dismiss(None)", "cancel")]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="open-box"):
+            yield Label("Import notebook — path to a .ipynb file anywhere on disk "
+                        "(Enter to import · Esc to cancel)", classes="modal-title")
+            yield Input(placeholder="~/Downloads/some_analysis.ipynb")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip() or None)
+
+
 class OutputViewerScreen(ModalScreen[None]):
     """Full-screen scrollable view of a cell's output (DataFrame or text)."""
 
@@ -698,7 +720,7 @@ class QuantLabApp(App[None]):
                   border: round $primary; padding: 1 2; }
     #search-results { height: 1fr; margin-top: 1; }
     .modal-title { margin-bottom: 1; }
-    HelpScreen, OpenScreen, NewNotebookScreen, ConfirmQuitScreen,
+    HelpScreen, OpenScreen, NewNotebookScreen, ImportScreen, ConfirmQuitScreen,
     ModelPickerScreen, OutputViewerScreen, SearchScreen {
         align: center middle; background: black 60%;
     }
@@ -715,6 +737,7 @@ class QuantLabApp(App[None]):
         Binding("ctrl+t", "pick_model", "model"),
         Binding("ctrl+o", "open_notebook", "open"),
         Binding("ctrl+n", "new_notebook", "new"),
+        Binding("f7", "import_notebook", "import"),
         Binding("ctrl+g", "new_strategy", "scaffold", show=False),
         Binding("f1", "help", "help"),
         Binding("ctrl+y", "apply_ai_code", "apply AI code", show=False),
@@ -1009,6 +1032,8 @@ class QuantLabApp(App[None]):
             self.action_search()
         elif key == "question_mark":
             self.action_help()
+        elif key == "w":
+            await self.walk_next_cell()
         else:
             return False
         return True
@@ -1172,7 +1197,8 @@ class QuantLabApp(App[None]):
             await log.mount(Markdown(
                 f"**Quant Mentor** ready (`{self.model}`). I can read your whole "
                 "notebook — ask about any cell, press `e` on a cell for a review, "
-                "or `f` on a failed cell to debug it.", classes="chat-ai"))
+                "`f` on a failed cell to debug it, or `w` to walk through the "
+                "notebook cell by cell with me narrating as you go.", classes="chat-ai"))
             return
         await log.mount(*(
             Markdown(msg["content"],
@@ -1217,6 +1243,45 @@ class QuantLabApp(App[None]):
         self.send_chat(f"Cell {idx} failed with `{err.get('ename')}: {err.get('evalue')}`. "
                        f"Diagnose the root cause and give me a corrected drop-in replacement "
                        f"for the whole cell.")
+
+    async def walk_next_cell(self) -> None:
+        """Guided walkthrough (`w`): run/render the selected cell, have the AI
+        mentor briefly narrate what it does, then land on the next cell —
+        one keypress per step, so you set the pace (great for stepping
+        through an imported/unfamiliar notebook cell by cell)."""
+        w = self.current_cell()
+        if w is None:
+            return
+        if self.chat_busy:
+            self.notify("Wait for the mentor to finish narrating", timeout=2)
+            return
+        idx = self.selected
+        if w.cell["cell_type"] == "code":
+            await self.execute_cell_widget(w)
+            digest = self._output_digest(w.cell)
+            prompt = (
+                f"Walkthrough step: briefly explain what cell {idx + 1} does and "
+                f"what its output shows — 2-4 plain sentences, no code block "
+                f"unless something's actually broken. Output:\n```\n{digest}\n```")
+        else:
+            w.sync_source()
+            w.show_markdown_rendered(True)
+            self.set_dirty()
+            prompt = (f"Walkthrough step: summarize this markdown cell {idx + 1} "
+                     f"in your own words, 1-2 sentences.")
+
+        self.chat_busy = True
+        try:
+            await self._send_chat_impl(prompt)
+        finally:
+            self.chat_busy = False
+
+        next_idx = idx + 1
+        if next_idx >= len(self.cells):
+            await self.insert_cell(len(self.cells), "code")
+        self.enter_command_mode()
+        self.select_cell(next_idx)
+        self.notify("w → continue walkthrough", timeout=2)
 
     @work(group="chat")
     async def send_chat(self, prompt: str) -> None:
@@ -1556,6 +1621,20 @@ class QuantLabApp(App[None]):
             self.call_later(self.load_notebook, path)
         self._confirm_discard(
             "switch", lambda: self.push_screen(NewNotebookScreen(), _create))
+
+    def action_import_notebook(self) -> None:
+        def _import(src: Optional[str]) -> None:
+            if not src:
+                return
+            try:
+                path = import_notebook(src)
+            except (NotebookPathError, OSError) as exc:
+                self.notify(f"Import failed: {exc}", severity="error")
+                return
+            self.notify(f"Imported → {path}", timeout=3)
+            self.call_later(self.load_notebook, path)
+        self._confirm_discard(
+            "switch", lambda: self.push_screen(ImportScreen(), _import))
 
     def _confirm_discard(self, verb: str, proceed) -> None:
         """Run `proceed` immediately if there are no unsaved changes, else

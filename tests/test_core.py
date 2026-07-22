@@ -9,6 +9,7 @@ from core import (
     build_chat_messages,
     create_strategy_notebook,
     expand_file_references,
+    import_notebook,
     load_notebook_file,
     notebook_context,
     safe_notebook_path,
@@ -88,6 +89,39 @@ def test_path_traversal_rejected():
         safe_notebook_path("../../etc/passwd.ipynb")
     with pytest.raises(NotebookPathError):
         safe_notebook_path("not_a_notebook.txt")
+
+
+def test_import_notebook_copies_in_and_dedupes_names(tmp_path):
+    src = tmp_path / "external.ipynb"
+    nb = nbformat.v4.new_notebook()
+    nb.cells = [nbformat.v4.new_code_cell("print('imported')")]
+    nbformat.write(nb, str(src))
+    imported_paths = []
+    try:
+        path = import_notebook(str(src))
+        imported_paths.append(path)
+        assert path == "external.ipynb"
+        loaded = load_notebook_file(path)
+        assert loaded["cells"][0]["source"] == "print('imported')"
+
+        # importing the same filename again must not clobber the first copy
+        path2 = import_notebook(str(src))
+        imported_paths.append(path2)
+        assert path2 == "external-1.ipynb"
+        assert (NOTEBOOK_DIR / "external.ipynb").exists()
+    finally:
+        for p in imported_paths:
+            (NOTEBOOK_DIR / p).unlink(missing_ok=True)
+
+
+def test_import_notebook_rejects_missing_or_invalid_files(tmp_path):
+    with pytest.raises(NotebookPathError):
+        import_notebook(str(tmp_path / "does_not_exist.ipynb"))
+
+    not_a_notebook = tmp_path / "not_really.ipynb"
+    not_a_notebook.write_text("{this is not valid json or nbformat}")
+    with pytest.raises(NotebookPathError):
+        import_notebook(str(not_a_notebook))
 
 
 def test_strategy_scaffold_is_bias_safe():
