@@ -37,6 +37,35 @@ MIGRATIONS = [
     );
     CREATE INDEX idx_sessions_task ON sessions(task_id);
     """,
+    # v2: free focus sessions (task_id NULL) that survive task deletion,
+    #     plus Todoist sync state (see terminus/todoist.py)
+    """
+    CREATE TABLE sessions_v2 (
+        id      INTEGER PRIMARY KEY,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+        start   TEXT NOT NULL,
+        end     TEXT
+    );
+    INSERT INTO sessions_v2 SELECT id, task_id, start, end FROM sessions;
+    DROP TABLE sessions;
+    ALTER TABLE sessions_v2 RENAME TO sessions;
+    CREATE INDEX idx_sessions_task ON sessions(task_id);
+    ALTER TABLE tasks ADD COLUMN todoist_id TEXT;
+    ALTER TABLE tasks ADD COLUMN todoist_temp_id TEXT;
+    CREATE UNIQUE INDEX idx_tasks_todoist ON tasks(todoist_id);
+    CREATE TABLE sync_state (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    CREATE TABLE todoist_outbox (
+        id      INTEGER PRIMARY KEY,
+        uuid    TEXT NOT NULL,
+        type    TEXT NOT NULL,
+        ref     TEXT,
+        temp_id TEXT,
+        args    TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -51,6 +80,7 @@ def _task(row: sqlite3.Row) -> Task:
         position=row["position"],
         fixed_start=time.fromisoformat(row["fixed_start"]) if row["fixed_start"] else None,
         done_at=datetime.fromisoformat(row["done_at"]) if row["done_at"] else None,
+        todoist_id=row["todoist_id"],
     )
 
 
@@ -173,6 +203,21 @@ class Database:
             self.conn.execute("UPDATE tasks SET position = ? WHERE id = ?", (other.position, task.id))
             self.conn.execute("UPDATE tasks SET position = ? WHERE id = ?", (task.position, other.id))
 
+    def set_day(self, task_id: int, day: date) -> None:
+        """Move a task to another day, appending it to that day's order."""
+        with self.conn:
+            (pos,) = self.conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM tasks WHERE day = ?", (day.isoformat(),)
+            ).fetchone()
+            self.conn.execute(
+                "UPDATE tasks SET day = ?, position = ? WHERE id = ? AND day != ?",
+                (day.isoformat(), pos, task_id, day.isoformat()),
+            )
+
+    def task_by_todoist_id(self, todoist_id: str) -> Task | None:
+        row = self.conn.execute("SELECT * FROM tasks WHERE todoist_id = ?", (todoist_id,)).fetchone()
+        return _task(row) if row else None
+
     def carry_over(self, today: date) -> int:
         """Move unfinished floating tasks from past days onto ``today``.
 
@@ -200,8 +245,8 @@ class Database:
         row = self.conn.execute("SELECT * FROM sessions WHERE end IS NULL LIMIT 1").fetchone()
         return _session(row) if row else None
 
-    def start_session(self, task_id: int, now: datetime) -> int:
-        """Start focusing on a task, ending any session already running."""
+    def start_session(self, task_id: int | None, now: datetime) -> int:
+        """Start focusing (on a task, or free focus if None), ending any running session."""
         self.stop_session(now)
         with self.conn:
             cur = self.conn.execute(

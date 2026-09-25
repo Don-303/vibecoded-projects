@@ -34,6 +34,8 @@ Requires Python 3.11+.
     floating tasks carry over to the next day automatically.
 - **Focus sessions** (`f`) log real time against a task. Time already spent reduces the
   task's remaining block. A notification fires at the end of every pomodoro.
+  Free focus (`F`, or `f` with no tasks) logs time without a task, and still counts toward
+  focus time and streaks. Deleting a task keeps its logged time.
 
 ## Keys
 
@@ -42,7 +44,8 @@ Requires Python 3.11+.
 | `1`–`4` | anywhere | Today / Tasks / Stats / Agent |
 | `n` | anywhere | New task form |
 | `space` | anywhere | Toggle done: the selected task in Tasks, the running or up-next task in Today |
-| `f` | anywhere | Start or pause focus on the same task |
+| `f` | anywhere | Start or pause focus on the selected or next task. With no tasks, starts free focus |
+| `F` | anywhere | Start or pause free focus (not tied to any task) |
 | `/` | anywhere | Agent view |
 | `q` | anywhere | Quit |
 | `a` | Tasks | Quick-add bar |

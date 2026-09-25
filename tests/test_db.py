@@ -12,7 +12,7 @@ def test_migration_is_idempotent(tmp_path):
     path = tmp_path / "x.db"
     Database(path).close()
     db = Database(path)
-    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_add_and_order(db):
@@ -71,8 +71,33 @@ def test_streak(db):
     assert db.streak(DAY + timedelta(days=2)) == 0
 
 
-def test_delete_cascades_sessions(db):
+def test_deleting_a_task_keeps_focus_history(db):
     t = db.add_task("A", DAY)
     db.start_session(t, at(9))
+    db.stop_session(at(9, 30))
     db.delete_task(t)
-    assert db.active_session() is None
+    assert db.focus_time_on(DAY, at(12)) == timedelta(minutes=30)
+    assert db.sessions_between(at(0), at(23))[0].task_id is None
+
+
+def test_free_focus_session(db):
+    db.start_session(None, at(9))
+    assert db.active_session().task_id is None
+    assert db.focus_time_on(DAY, at(9, 40)) == timedelta(minutes=40)
+    assert db.streak(DAY) == 1
+
+
+def test_upgrade_from_v1_keeps_sessions(tmp_path):
+    import sqlite3
+    from terminus.db import MIGRATIONS, Database
+    path = tmp_path / "v1.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(MIGRATIONS[0])
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute("INSERT INTO tasks (title, day, position, created_at) VALUES ('x', '2026-09-25', 1, '')")
+    conn.execute("INSERT INTO sessions (task_id, start, end) VALUES (1, '2026-09-25T09:00:00', '2026-09-25T09:25:00')")
+    conn.commit()
+    conn.close()
+    db = Database(path)
+    assert db.worked_by_task([1], at(12)) == {1: timedelta(minutes=25)}
+    assert db.get_task(1).todoist_id is None

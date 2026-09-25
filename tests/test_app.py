@@ -95,3 +95,27 @@ async def test_nav_keys(config, clock):
         for key, view in [("3", "stats"), ("slash", "agent"), ("1", "today")]:
             await pilot.press(key)
             assert app.current_view == view
+
+
+async def test_free_focus_without_tasks(config, clock):
+    app = make_app(config, clock)
+    async with app.run_test() as pilot:
+        await pilot.press("f")  # no tasks at all
+        active = app.db.active_session()
+        assert active is not None and active.task_id is None
+        clock.advance(minutes=26)
+        app._tick()
+        assert app._pomos_notified == 1
+        await pilot.press("f")
+        assert app.db.active_session() is None
+        assert app.db.focus_time_on(clock.now.date(), clock.now).total_seconds() == 26 * 60
+
+
+async def test_shift_f_is_free_focus_even_with_tasks(config, clock):
+    app = make_app(config, clock)
+    app.db.add_task("Write", clock.now.date())
+    async with app.run_test() as pilot:
+        await pilot.press("F")
+        assert app.db.active_session().task_id is None
+        await pilot.press("F")
+        assert app.db.active_session() is None

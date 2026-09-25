@@ -48,6 +48,7 @@ class TerminusApp(App):
         Binding("n", "new_task", "New"),
         Binding("space", "toggle_done", "Done"),
         Binding("f", "toggle_focus", "Focus"),
+        Binding("F", "toggle_focus(True)", "Free focus", show=False),
         Binding("slash", "agent", "Agent"),
         Binding("q", "quit", "Quit"),
     ]
@@ -143,7 +144,7 @@ class TerminusApp(App):
 
     def _update_status(self, now: datetime) -> None:
         active = self.db.active_session()
-        task = self.db.get_task(active.task_id) if active else None
+        task = self.db.get_task(active.task_id) if active and active.task_id else None
         left, number = None, 0
         if active:
             elapsed = active.elapsed(now)
@@ -153,7 +154,7 @@ class TerminusApp(App):
             now=now,
             streak=self.db.streak(now.date()),
             focus_today=self.db.focus_time_on(now.date(), now),
-            focus_task=task.title if task else None,
+            focus_task=(task.title if task else "Free focus") if active else None,
             pomodoro_left=left,
             pomodoro_number=number,
         )
@@ -255,6 +256,9 @@ class TerminusApp(App):
         pending = self._pending_delete
         if pending and pending[0] == task.id and now - pending[1] < timedelta(seconds=4):
             self._pending_delete = None
+            active = self.db.active_session()
+            if active and active.task_id == task.id:
+                self.db.stop_session(now)  # its logged time is kept as free focus
             self.db.delete_task(task.id)
             self.notify(f"Deleted “{task.title}”.")
             self.refresh_all()
@@ -295,22 +299,24 @@ class TerminusApp(App):
             self.notify(f"Done: “{task.title}”. Remaining blocks re-planned.")
         self.refresh_all()
 
-    def action_toggle_focus(self) -> None:
+    def action_toggle_focus(self, free: bool = False) -> None:
+        """Pause a running session, or start one.
+
+        ``f`` focuses the selected/next task, falling back to free focus when
+        there is none; ``F`` always starts free focus (no task attached).
+        """
         now = self.now()
         stopped = self.db.stop_session(now)
         if stopped:
             self.notify(f"Focus paused — {fmt_duration(stopped.elapsed(now))} logged.")
         else:
-            task = self.selected_task()
-            if task is None:
-                self.notify("Nothing to focus on — add a task with n.", severity="warning")
+            task = None if free else self.selected_task()
+            if task is not None and task.done:
+                self.notify("That task is already done — F starts free focus.", severity="warning")
                 return
-            if task.done:
-                self.notify("That task is already done.", severity="warning")
-                return
-            self.db.start_session(task.id, now)
+            self.db.start_session(task.id if task else None, now)
             self._pomos_notified = 0
-            self.notify(f"Focusing on “{task.title}”.", title="Focus")
+            self.notify(f"Focusing on “{task.title}”." if task else "Free focus started.", title="Focus")
         self.refresh_all()
 
     # ── events ───────────────────────────────────────────────────────────

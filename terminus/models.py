@@ -20,6 +20,7 @@ class Task:
     status: str = "todo"  # "todo" | "done"
     fixed_start: time | None = None  # set => pinned block (meeting); else floating
     done_at: datetime | None = None
+    todoist_id: str | None = None
 
     @property
     def done(self) -> bool:
@@ -32,10 +33,10 @@ class Task:
 
 @dataclass
 class Session:
-    """A stretch of focused work on a task. ``end`` is None while running."""
+    """A stretch of focused work. ``task_id`` is None for free focus; ``end`` is None while running."""
 
     id: int
-    task_id: int
+    task_id: int | None
     start: datetime
     end: datetime | None = None
 

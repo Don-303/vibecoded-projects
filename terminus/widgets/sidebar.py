@@ -49,7 +49,7 @@ class Sidebar(Vertical):
         text.append("focus    ", style=MUTED)
         if focus_task is None:
             text.append("off\n", style=MUTED)
-            text.append("press f to start", style=MUTED)
+            text.append("f task · F free", style=MUTED)
         else:
             text.append("active\n", style=f"bold {CYAN}")
             text.append(f"{focus_task}\n", style=CYAN)
