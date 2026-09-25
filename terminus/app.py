@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.containers import Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Input, Markdown, OptionList
 from textual.widgets.markdown import MarkdownStream
 
 from terminus import actions, brief, stats
-from terminus.agent_client import HermesClient, HermesError, build_context
+from terminus.agent_client import GMAIL_HINT, HermesClient, HermesError, build_context
 from terminus.config import Config
 from terminus.db import Database
 from terminus.models import DayPlan, Task
@@ -26,6 +27,9 @@ from terminus.todoist import TodoistError, TodoistSync
 from terminus.widgets import (
     AgentConsole,
     BriefView,
+    JobModal,
+    JobsView,
+    StagePicker,
     Sidebar,
     StatsView,
     TaskModal,
@@ -40,7 +44,8 @@ from terminus.widgets.timeline import fmt_duration
 MAIN_SCREEN_ACTIONS = {
     "show", "new_task", "toggle_done", "toggle_focus", "agent",
     "edit_task", "delete_task", "move_task", "quit", "sync", "do_today", "new_chat",
-    "make_brief",
+    "make_brief", "add_job", "edit_job", "stage_job", "open_job_link", "delete_job",
+    "scan_job_email",
 }  # fmt: skip
 
 #: Chat turns (user + assistant messages) sent to Hermes as history.
@@ -57,6 +62,7 @@ class TerminusApp(App):
         Binding("3", "show('stats')", "Stats", show=False),
         Binding("4", "show('agent')", "Agent", show=False),
         Binding("5", "show('brief')", "Brief", show=False),
+        Binding("6", "show('jobs')", "Jobs", show=False),
         Binding("n", "new_task", "New"),
         Binding("space", "toggle_done", "Done"),
         Binding("f", "toggle_focus", "Focus"),
@@ -117,6 +123,7 @@ class TerminusApp(App):
                 yield StatsView(id="stats")
                 yield AgentConsole(id="agent")
                 yield BriefView(id="brief")
+                yield JobsView(id="jobs")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -180,6 +187,8 @@ class TerminusApp(App):
         self.tasks_view.update_tasks(tasks, self.plan, worked, cfg.pomodoro)
         if self.current_view == "stats":
             self.query_one(StatsView).update_stats(stats.compute(self.db, now))
+        if self.current_view == "jobs":
+            self.query_one(JobsView).update_jobs(self.db.list_jobs(), now)
         self._update_status(now)
 
     def _update_status(self, now: datetime) -> None:
@@ -234,6 +243,12 @@ class TerminusApp(App):
 
     def _tick(self) -> None:
         """Runs every second: live timer, minute re-plan, midnight rollover."""
+        try:
+            self._tick_inner()
+        except NoMatches:
+            pass  # the UI is being torn down (quitting); nothing left to update
+
+    def _tick_inner(self) -> None:
         now = self.now()
         if now.date() != self._day:
             self._day = now.date()
@@ -329,6 +344,10 @@ class TerminusApp(App):
         elif view == "stats":
             self.query_one(StatsView).update_stats(stats.compute(self.db, self.now()))
             self.query_one("#stats-scroll").focus()
+        elif view == "jobs":
+            jobs_view = self.query_one(JobsView)
+            jobs_view.update_jobs(self.db.list_jobs(), self.now())
+            jobs_view.focus_table()
         elif view == "brief":
             self._brief_seen = self._day
             self._update_brief_banner()
@@ -368,26 +387,29 @@ class TerminusApp(App):
             streak=self.db.streak(now.date()),
             focus_task=(task.title if task else "free focus") if active else None,
             upcoming=self.db.upcoming_tasks(self._day),
+            jobs=self.db.list_jobs(),
             actions=actions,
         )
 
     @on(Input.Submitted, "#agent-input")
     def _agent_submit(self, event: Input.Submitted) -> None:
-        prompt = event.value.strip()
+        if self.send_to_agent(event.value):
+            event.input.clear()
+
+    def send_to_agent(self, prompt: str) -> bool:
+        """Send a message to Hermes as if typed in the chat. False if not sent."""
+        prompt = prompt.strip()
         if not prompt:
-            return
+            return False
         if self._agent_busy:
             self.notify("Hermes is still answering…", severity="warning")
-            return
-        event.input.clear()
-        if self._proposal is not None:
-            self._proposal.decided = True
-            self._proposal.resolve("Superseded by your next message — nothing changed.", applied=False)
-            self._proposal = None
+            return False
+        self._clear_pending_proposal()
         self.query_one(AgentConsole).add_user(prompt)
         self._chat.append({"role": "user", "content": prompt})
         self._agent_busy = True
         self.run_worker(self._ask(), group="hermes-chat", exit_on_error=False)
+        return True
 
     async def _ask(self) -> None:
         console = self.query_one(AgentConsole)
@@ -436,6 +458,12 @@ class TerminusApp(App):
 
     # ── proposed changes (v3) ────────────────────────────────────────────
 
+    def _clear_pending_proposal(self) -> None:
+        if self._proposal is not None:
+            self._proposal.decided = True
+            self._proposal.resolve("Superseded by your next message — nothing changed.", applied=False)
+            self._proposal = None
+
     def _offer_changes(self, answer: str) -> None:
         """If the reply proposes task changes, check them and ask the user to confirm."""
         _, entries, error = actions.extract(answer)
@@ -447,7 +475,13 @@ class TerminusApp(App):
         known = {t.id: t for t in self.db.tasks_for_day(self._day)}
         known.update({t.id: t for t in self.db.upcoming_tasks(self._day)})
         now = self.now()
-        proposal = actions.validate(entries, known, today=self._day, now_time=now.time())
+        jobs = {j.id: j for j in self.db.list_jobs()}
+        proposal = actions.validate(entries, known, today=self._day, now_time=now.time(),
+                                    jobs=jobs)
+        self._show_proposal(proposal)
+
+    def _show_proposal(self, proposal: actions.Proposal) -> None:
+        console = self.query_one(AgentConsole)
         panel = ProposalPanel(proposal)
         console.log_area.mount(panel)
         console.log_area.scroll_end(animate=False)
@@ -487,6 +521,15 @@ class TerminusApp(App):
     def _apply_change(self, c: actions.Change) -> None:
         """Apply one confirmed change through the same paths as the keybindings."""
         now = self.now()
+        if c.op == "job_add":
+            fields = dict(c.job_fields)
+            self.db.add_job(fields.pop("company"), now=now, **fields)
+            return
+        if c.op == "job_update":
+            if self.db.get_job(c.job_id) is None:
+                raise LookupError("application no longer exists")
+            self.db.update_job(c.job_id, now=now, **c.job_fields)
+            return
         if c.op == "add":
             task_id = self.db.add_task(c.title, c.day, estimate=c.estimate, tags=c.tags,
                                        fixed_start=c.at, now=now)
@@ -524,6 +567,159 @@ class TerminusApp(App):
                 fixed_start=task.fixed_start,
             )
             self._pushed(TodoistSync.queue_update, task, self.db.get_task(task.id))
+
+    # ── job tracker ──────────────────────────────────────────────────────
+
+    def _selected_job(self):
+        job_id = self.query_one(JobsView).selected_job_id()
+        return self.db.get_job(job_id) if job_id is not None else None
+
+    def _refresh_jobs(self) -> None:
+        self.query_one(JobsView).update_jobs(self.db.list_jobs(), self.now())
+
+    def action_add_job(self) -> None:
+        def save(fields: dict | None) -> None:
+            if fields:
+                self.db.add_job(fields.pop("company"), now=self.now(), **fields)
+                self._refresh_jobs()
+
+        self.push_screen(JobModal(today=self._day), save)
+
+    def action_edit_job(self) -> None:
+        job = self._selected_job()
+        if job is None:
+            return
+
+        def save(fields: dict | None) -> None:
+            if fields:
+                self.db.update_job(job.id, now=self.now(), **fields)
+                self._refresh_jobs()
+
+        self.push_screen(JobModal(job, today=self._day), save)
+
+    def action_stage_job(self) -> None:
+        job = self._selected_job()
+        if job is None:
+            return
+
+        def picked(stage: str | None) -> None:
+            if stage and stage != job.stage:
+                self.db.update_job(job.id, stage=stage, now=self.now())
+                self.notify(f"{job.label}: {job.stage} → {stage}")
+                self._refresh_jobs()
+
+        self.push_screen(StagePicker(job), picked)
+
+    def action_open_job_link(self) -> None:
+        job = self._selected_job()
+        if job is None:
+            return
+        if not job.link:
+            self.notify("No link saved for this application (e to add one).")
+            return
+        import webbrowser
+        webbrowser.open(job.link)
+
+    def action_delete_job(self) -> None:
+        job = self._selected_job()
+        if job is None:
+            return
+        now = self.now()
+        pending = self._pending_delete
+        key = -job.id  # negative: a job, not a task
+        if pending and pending[0] == key and now - pending[1] < timedelta(seconds=4):
+            self._pending_delete = None
+            self.db.delete_job(job.id)
+            self.notify(f"Deleted {job.label}.")
+            self._refresh_jobs()
+        else:
+            self._pending_delete = (key, now)
+            self.notify(f"Press d again to delete {job.label}.", severity="warning", timeout=4)
+
+    def action_scan_job_email(self) -> None:
+        """Ask Hermes to check Gmail for job updates, then propose tracker changes.
+
+        Two steps, because gpt-oss:20b fumbles doing it all at once: (1) Hermes runs a
+        Gmail search and returns just a list of emails; (2) that list plus the tracker
+        go back to Hermes as a normal chat turn, whose proposed changes the user confirms.
+        """
+        if not self.hermes.api_key:
+            self.notify("Connect Hermes first ([4] AI Agent shows how).", severity="warning")
+            return
+        if self._agent_busy:
+            self.notify("Hermes is still answering…", severity="warning")
+            return
+        last = self.db.get_state("jobs_last_scan")
+        days = max(1, (self._day - date.fromisoformat(last)).days + 1) if last else 14
+        self.action_show("agent")
+        self._clear_pending_proposal()
+        self.query_one(AgentConsole).add_user(f"Check my email for job updates (last {days} days)")
+        self._agent_busy = True
+        self.run_worker(self._scan_jobs(days), group="hermes-chat", exit_on_error=False)
+
+    async def _scan_jobs(self, days: int) -> None:
+        console = self.query_one(AgentConsole)
+        self._update_agent_status()
+        activity = console.add_activity("⚙ Hermes is searching your Gmail…")
+        query = (f"newer_than:{days}d (application OR applying OR applied OR interview OR "
+                 "assessment OR offer OR candidate OR recruiter OR hiring) "
+                 "-category:promotions -category:social")
+        prompt = (
+            f"{GMAIL_HINT} Run search_emails with the query `{query}` (up to 40 results). "
+            "Reply with ONLY a JSON array, one object per email, no prose: "
+            '[{"id": "<gmail message id>", "from": "<sender name>", "subject": "…", '
+            '"date": "YYYY-MM-DD", "company": "<employer the application is with>", '
+            '"role": "<position, or empty if not named>", "stage": "<stage>", '
+            '"summary": "<one line>"}]. '
+            'stage is "none" unless the email is about one of MY OWN applications '
+            "(job alerts, newsletters, marketing, courses = none). Otherwise: application "
+            'sent / received / thanks for applying = "applied"; reminder to finish an '
+            'application = "saved"; test, assessment or screening call = "screening"; '
+            'interview invite = "interview"; offer = "offer"; unfortunately / not progressing '
+            '= "rejected". Base every field only on that email. Use [] if nothing matches.'
+        )
+        try:
+            for attempt in (1, 2):  # the model occasionally answers [] without looking
+                text = ""
+                async for event in self.hermes.stream_chat([{"role": "user", "content": prompt}]):
+                    if event.kind == "token":
+                        text += event.text
+                    else:
+                        activity.update(Text(f"⚙ {event.text}", style=MUTED))
+                emails = actions.parse_email_list(text)
+                if emails:
+                    break
+                activity.update(Text("⚙ Nothing found — asking Hermes to search once more…",
+                                     style=MUTED))
+        except (HermesError, ValueError) as exc:
+            activity.update("")
+            console.add_error(f"Couldn't get the email list from Hermes: {exc}")
+            self._agent_busy = False
+            self._update_agent_status()
+            return
+
+        self.db.set_state("jobs_last_scan", self._day.isoformat())
+        jobs = {j.id: j for j in self.db.list_jobs()}
+        entries = actions.job_entries_from_emails(emails, jobs)
+        mine = [e for e in emails if str(e.get("stage", "none")).lower() not in ("", "none")]
+        if not emails:
+            summary = [f"No job-related emails in the last {days} days."]
+        else:
+            summary = [f"Checked {len(emails)} emails from the last {days} days — "
+                       f"{len(mine)} about your applications."]
+        summary += [f"- **{e.get('company') or e.get('from')}** · {e.get('stage')} · "
+                    f"{e.get('subject')}" for e in mine]
+        if mine and not entries:
+            summary.append("\nYour tracker is already up to date.")
+        activity.remove()
+        console.add_reply("\n".join(summary))
+        self._chat.append({"role": "user", "content": "Check my email for job updates."})
+        self._chat.append({"role": "assistant", "content": "\n".join(summary)})
+        self._agent_busy = False
+        self._update_agent_status()
+        if entries:
+            self._show_proposal(actions.validate(entries, {}, today=self._day,
+                                                 now_time=self.now().time(), jobs=jobs))
 
     # ── morning brief ────────────────────────────────────────────────────
 
@@ -767,7 +963,38 @@ class TerminusApp(App):
         self._add_parsed(parsed)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    import argparse
+    import sys
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(prog="terminus", description="Terminal day planner.")
+    sub = parser.add_subparsers(dest="command")
+    imp = sub.add_parser("import-jobs", help="import job applications from a CSV file")
+    imp.add_argument("csv", type=Path, help="e.g. Google Sheets → File → Download → CSV")
+    imp.add_argument("--dry-run", action="store_true", help="show what would be imported")
+    args = parser.parse_args(argv)
+
+    if args.command == "import-jobs":
+        from terminus.jobs_import import import_csv
+
+        config = Config.from_env()
+        db = Database(config.db_path)
+        try:
+            result = import_csv(db, args.csv, now=datetime.now().replace(microsecond=0),
+                                dry_run=args.dry_run)
+        except (OSError, ValueError) as exc:
+            sys.exit(f"import-jobs: {exc}")
+        print("Columns: " + ", ".join(f"{theirs} → {ours}" for ours, theirs in result.columns.items()))
+        verb = "Would add" if args.dry_run else "Added"
+        print(f"{verb} {len(result.added)}:")
+        for line in result.added:
+            print(f"  + {line}")
+        if result.skipped:
+            print(f"Skipped {len(result.skipped)}:")
+            for line in result.skipped:
+                print(f"  - {line}")
+        return
     TerminusApp().run()
 
 

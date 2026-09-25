@@ -77,6 +77,20 @@ class AgentConsole(Vertical):
         self.log_area.scroll_end(animate=False)
         return reply, activity
 
+    def add_reply(self, markdown: str) -> Markdown:
+        """A complete (non-streamed) reply."""
+        reply = Markdown(markdown, classes="agent-reply")
+        self.log_area.mount(reply)
+        self.log_area.scroll_end(animate=False)
+        return reply
+
+    def add_activity(self, message: str) -> Static:
+        """A dim status line (e.g. tool progress) that can be updated later."""
+        line = Static(Text(message, style=MUTED), classes="agent-activity")
+        self.log_area.mount(line)
+        self.log_area.scroll_end(animate=False)
+        return line
+
     def add_error(self, message: str) -> None:
         self.log_area.mount(Static(Text(f"✗ {message}", style=RED), classes="agent-error"))
         self.log_area.scroll_end(animate=False)

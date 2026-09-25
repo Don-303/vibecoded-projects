@@ -259,3 +259,81 @@ Footer {
 .proposal-rejected, .proposal-outcome {
     height: auto;
 }
+
+/* ── jobs ────────────────────────────────────────────────── */
+
+#jobs-table {
+    height: 1fr;
+    background: $background;
+    scrollbar-size-vertical: 1;
+}
+
+#jobs-table > .datatable--header {
+    background: $background;
+    color: $muted;
+    text-style: bold;
+}
+
+#jobs-table:focus > .datatable--cursor {
+    background: $primary 20%;
+}
+
+#jobs-hint {
+    margin-top: 1;
+}
+
+JobModal, StagePicker {
+    align: center middle;
+    background: $background 60%;
+}
+
+#job-modal {
+    width: 76;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#job-modal Label {
+    color: $muted;
+    margin-top: 1;
+}
+
+.modal-row {
+    height: auto;
+}
+
+.modal-row > Vertical {
+    height: auto;
+    width: 1fr;
+}
+
+#j-error {
+    color: $error;
+    height: auto;
+}
+
+#j-buttons {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+#j-buttons Button {
+    margin-left: 1;
+}
+
+#stage-picker {
+    width: 44;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#stage-options {
+    height: auto;
+    background: $surface;
+    border: none;
+}

@@ -89,3 +89,33 @@ class DayPlan:
     @property
     def up_next(self) -> Block | None:
         return next((b for b in self.blocks if b.state is BlockState.NEXT), None)
+
+
+#: Job-application stages, in pipeline order. The last two close an application.
+STAGES = ["saved", "applied", "screening", "interview", "offer", "rejected", "withdrawn"]
+CLOSED_STAGES = {"rejected", "withdrawn"}
+
+
+@dataclass
+class Job:
+    """One job application on the Jobs page."""
+
+    id: int
+    company: str
+    role: str = ""
+    stage: str = "applied"
+    applied_on: date | None = None
+    next_step: str = ""
+    next_date: date | None = None
+    link: str = ""
+    email_ref: str | None = None  # Gmail message id, so email updates aren't added twice
+    notes: str = ""
+    updated_at: datetime | None = None
+
+    @property
+    def closed(self) -> bool:
+        return self.stage in CLOSED_STAGES
+
+    @property
+    def label(self) -> str:
+        return f"{self.company} — {self.role}" if self.role else self.company

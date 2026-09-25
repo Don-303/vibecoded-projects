@@ -22,10 +22,16 @@ from datetime import datetime, timedelta
 import httpx
 
 from terminus.actions import PROTOCOL
-from terminus.models import BlockState, DayPlan, Task
+from terminus.models import BlockState, DayPlan, Job, Task
 from terminus.widgets.timeline import fmt_duration
 
 DEFAULT_PORT = 8642
+
+#: Hermes loads MCP tools lazily; without this, the model sometimes decides it has no Gmail.
+GMAIL_HINT = (
+    "You do have read-only Gmail access through MCP tools that may not be loaded yet: call "
+    "tool_search for \"gmail\" first, then use the search_emails / read_email tools it finds."
+)
 
 
 class HermesError(Exception):
@@ -174,6 +180,7 @@ def build_context(
     streak: int,
     focus_task: str | None,
     upcoming: list[Task] = (),
+    jobs: list[Job] = (),
     actions: bool = False,
 ) -> str:
     """The system message: who the agent is talking to and what their day looks like.
@@ -220,6 +227,20 @@ def build_context(
         for t in upcoming:
             at = f" {t.fixed_start:%H:%M}" if t.fixed_start else ""
             lines.append(f"- [#{t.id}] {t.day:%a %d %b}{at} {t.title} ({est(t)}){tags(t)}")
+    active_jobs = [j for j in jobs if not j.closed]
+    if active_jobs:
+        lines += ["", "Job applications (active):"]
+        for j in active_jobs:
+            bits = [j.stage]
+            if j.applied_on:
+                bits.append(f"applied {j.applied_on:%d %b}")
+            if j.next_step or j.next_date:
+                when = f"{j.next_date:%a %d %b} " if j.next_date else ""
+                bits.append(f"next: {when}{j.next_step}".strip())
+            lines.append(f"- [J#{j.id}] {j.label} · " + " · ".join(bits))
+        closed = len(jobs) - len(active_jobs)
+        if closed:
+            lines.append(f"({closed} closed applications not shown)")
     lines += [
         "",
         f"Focus logged today: {fmt_duration(focus_today)}. Streak: {streak} days. "

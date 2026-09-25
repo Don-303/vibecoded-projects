@@ -19,6 +19,8 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
+from terminus.agent_client import GMAIL_HINT
+
 FINANCE_FEEDS = {
     "CNBC Markets": "https://www.cnbc.com/id/20910258/device/rss/rss.html",
     "CNBC Finance": "https://www.cnbc.com/id/10000664/device/rss/rss.html",
@@ -166,6 +168,12 @@ Write the user's morning brief in Markdown, under ~350 words, with these section
 Two or three sentences: what the day looks like and what to start with (use the plan above; \
 mention overdue tasks worth pulling in).
 {email_section}
+## Job hunt
+Only if there are active job applications above or job-related emails: 1–3 bullets on \
+what's coming up (interviews, deadlines, follow-ups due) and any email that looks like a \
+job update. If an email changes an application's stage or is a new application, say \
+"press u on the Jobs page [6] to update the tracker". Leave the section out otherwise.
+
 ## Markets & finance
 5–8 one-line bullets of the most important finance/markets news, most significant first, \
 grouped where related, source in parentheses. Start from the headlines provided; search for \
@@ -175,9 +183,9 @@ No investment advice.
 
 Reply with the brief only — no preamble."""
 
-EMAIL_SECTION = """
+EMAIL_SECTION = f"""
 ## Email
-Check the user's Gmail inbox for the last 24 hours with your email tools. Only what needs \
+{GMAIL_HINT} Check the user's Gmail inbox for the last 24 hours. Only what needs \
 attention: replies owed, deadlines, anything from a real person — one bullet each: **who** — \
 what they want (and by when). Skip newsletters, receipts and notifications unless urgent. If \
 nothing needs attention, say so in one line. If you have no email access, say "Email isn't \

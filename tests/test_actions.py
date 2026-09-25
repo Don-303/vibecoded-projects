@@ -101,3 +101,95 @@ def test_filter_hides_block_even_when_fence_is_split():
     g = VisibleFilter()
     assert g.feed("Use `code` ``") == "Use `code` "  # held back: could be a fence
     assert g.feed(" no") == "`` no" and g.flush() == ""
+
+
+# ── jobs ──
+
+def jobs():
+    from terminus.models import Job
+    return {3: Job(3, "Northwind", "Quant Research Intern", "applied", email_ref="m-1")}
+
+
+def check_jobs(entries):
+    return validate(entries, tasks(), today=DAY, now_time=NOW, jobs=jobs())
+
+
+def test_job_changes():
+    p = check_jobs([
+        {"op": "job_add", "company": "Acme", "role": "Junior Analyst", "stage": "Applied",
+         "link": "https://acme.example/jobs/1", "email_ref": "m-2"},
+        {"op": "job_update", "job": 3, "stage": "Interview scheduled", "next_step": "Interview",
+         "next_date": "2026-09-30"},
+    ])
+    assert p.rejected == []
+    add, update = p.changes
+    assert add.summary == "Track job “Acme — Junior Analyst” · Applied"
+    assert add.job_fields["applied_on"] == DAY and add.job_fields["email_ref"] == "m-2"
+    assert update.summary == ("Update job “Northwind — Quant Research Intern” · Applied → Interview"
+                              " · next: Wed 30 Sep Interview")
+    assert update.job_fields == {"stage": "interview", "next_step": "Interview",
+                                 "next_date": date(2026, 9, 30)}
+
+
+def test_bad_job_changes_are_rejected():
+    p = check_jobs([
+        {"op": "job_add", "company": "northwind", "role": "quant research intern"},
+        {"op": "job_add", "company": "Other", "email_ref": "m-1"},
+        {"op": "job_add", "role": "No company"},
+        {"op": "job_add", "company": "X", "link": "javascript:alert(1)"},
+        {"op": "job_update", "job": 42, "stage": "offer"},
+        {"op": "job_update", "job": 3, "stage": "applied"},
+    ])
+    assert p.changes == []
+    assert p.rejected == [
+        "#1 job_add: already tracked as [J#3] Northwind — Quant Research Intern — use job_update",
+        "#2 job_add: that email is already tracked as [J#3] Northwind — Quant Research Intern",
+        "#3 job_add: needs a company",
+        "#4 job_add: link 'javascript:alert(1)' isn't a web address",
+        "#5 job_update: no job [J#42]",
+        "#6 job_update: nothing to change on Northwind — Quant Research Intern",
+    ]
+
+
+def test_placeholder_roles_are_dropped():
+    p = check_jobs([{"op": "job_add", "company": "Contoso", "role": "(position unknown)",
+                     "next_step": "N/A"}])
+    assert p.changes[0].summary == "Track job “Contoso” · Applied"
+    assert "role" not in p.changes[0].job_fields and "next_step" not in p.changes[0].job_fields
+
+
+def test_parse_email_list():
+    from terminus.actions import parse_email_list
+    text = 'Here you go:\n```json\n[{"id": 12, "from": "Acme", "subject": "Thanks\\nfor applying",' \
+           ' "summary": "applied"}, {"id": "x"}, "junk"]\n```'
+    assert parse_email_list(text) == [{"id": "12", "from": "Acme", "subject": "Thanks for applying",
+                                       "date": "", "summary": "applied"}]
+    assert parse_email_list("[]") == []
+    with pytest.raises(ValueError, match="didn't return"):
+        parse_email_list("I couldn't access Gmail.")
+
+
+def test_job_entries_from_emails():
+    from terminus.actions import job_entries_from_emails
+    from terminus.models import Job
+    known = {3: Job(3, "Northwind", "Quant Research Intern", "interview"),
+             4: Job(4, "INITECH", "", "rejected")}
+    emails = [
+        {"id": "a", "date": "2026-09-20", "company": "Acme", "role": "", "stage": "saved"},
+        {"id": "b", "date": "2026-09-22", "company": "acme", "role": "Analyst", "stage": "applied"},
+        {"id": "c", "date": "2026-09-21", "company": "Northwind", "role": "Quant Research Intern",
+         "stage": "applied"},  # older news: don't move interview back to applied
+        {"id": "d", "date": "2026-09-24", "company": "Northwind", "role": "", "stage": "rejected"},
+        {"id": "e", "date": "2026-09-23", "company": "INITECH", "stage": "interview"},  # closed: leave
+        {"id": "f", "date": "2026-09-25", "company": "beBee", "stage": "none"},
+        {"id": "g", "date": "2026-09-25", "company": "", "stage": "applied"},
+        {"id": "h", "date": "2026-09-25", "company": "Contoso", "role": "HR Application",
+         "stage": "applied"},
+    ]
+    assert job_entries_from_emails(emails, known) == [
+        {"op": "job_add", "company": "Acme", "stage": "applied", "email_ref": "a",
+         "role": "Analyst"},
+        {"op": "job_update", "job": 3, "stage": "rejected"},
+        {"op": "job_add", "company": "Contoso", "stage": "applied", "email_ref": "h",
+         "applied_on": "2026-09-25"},
+    ]

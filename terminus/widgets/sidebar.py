@@ -19,6 +19,7 @@ VIEWS = [
     ("stats", "Stats"),
     ("agent", "AI Agent"),
     ("brief", "Brief"),
+    ("jobs", "Jobs"),
 ]
 
 

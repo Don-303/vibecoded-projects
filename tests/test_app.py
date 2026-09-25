@@ -456,3 +456,103 @@ async def test_brief_does_not_offer_changes(config, clock, fake_gather):
     async with app.run_test() as pilot:
         await app.workers.wait_for_complete()
         assert "terminus-actions" not in fake.requests[-1]["messages"][0]["content"]
+
+
+# ── jobs ──
+
+async def test_jobs_page_add_stage_toggle_delete(config, clock):
+    from terminus.widgets import JobModal, StagePicker
+    app = make_app(config, clock)
+    app.db.add_job("Vandelay", role="Trading Intern", stage="rejected", now=clock.now)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("6")
+        assert app.current_view == "jobs"
+        assert app.query_one("#jobs-table").row_count == 0  # rejected is hidden
+        await pilot.press("h")
+        assert app.query_one("#jobs-table").row_count == 1
+        await pilot.press("h")
+
+        await pilot.press("a")
+        assert isinstance(app.screen, JobModal)
+        await pilot.press(*"Northwind")
+        app.screen.query_one("#j-role").value = "Quant Research Intern"
+        app.screen.query_one("#j-next").value = "Interview"
+        app.screen.query_one("#j-next-date").value = "tuesday"
+        await pilot.press("enter")
+        job = app.db.find_job("Northwind")
+        assert job.stage == "applied" and job.applied_on == clock.now.date()
+        assert str(job.next_date) == "2026-09-29"
+
+        await pilot.press("s")
+        assert isinstance(app.screen, StagePicker)
+        await pilot.press("down", "down", "enter")  # applied → screening → interview
+        assert app.db.get_job(job.id).stage == "interview"
+        assert [s for s, _ in app.db.job_history(job.id)] == ["applied", "interview"]
+
+        await pilot.press("d", "d")
+        assert app.db.get_job(job.id) is None
+
+
+async def test_scan_email_labels_then_terminus_proposes(config, clock):
+    import json
+    from fake_hermes import FakeHermes
+    from terminus.agent_client import HermesClient
+    db = Database(":memory:")
+    p72 = db.add_job("Northwind", role="Quant Research Intern", now=clock.now)
+    labelled = "```json\n" + json.dumps([
+        {"id": "m-1", "from": "Northwind", "subject": "Interview invitation", "date": "2026-09-24",
+         "company": "Northwind", "role": "Quant Research Intern", "stage": "interview",
+         "summary": "First-round interview"},
+        {"id": "m-9", "from": "LinkedIn", "subject": "Your application was sent to Acme",
+         "date": "2026-09-23", "company": "Acme", "role": "Junior Analyst", "stage": "applied"},
+        {"id": "m-5", "from": "beBee", "subject": "20 jobs for you", "date": "2026-09-25",
+         "company": "", "stage": "none"},
+    ]) + "\n```"
+    fake = FakeHermes(replies=[labelled])
+    fake.tool_events = False
+    app = TerminusApp(config=config, db=db, clock=clock,
+                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
+    async with app.run_test(size=(120, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.press("6", "u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.current_view == "agent" and len(fake.requests) == 1  # one Hermes call
+        assert "newer_than:14d" in fake.requests[0]["messages"][0]["content"]
+        shown = app.query_one(".agent-reply").source
+        assert "Checked 3 emails from the last 14 days — 2 about your applications." in shown
+        assert app.db.get_state("jobs_last_scan") == "2026-09-25"
+        await pilot.press("y")
+        await pilot.pause()
+        assert app.db.get_job(p72).stage == "interview"
+        acme = app.db.find_job("Acme")
+        assert acme.email_ref == "m-9" and str(acme.applied_on) == "2026-09-23"
+
+
+async def test_scan_email_with_nothing_found(config, clock):
+    from fake_hermes import FakeHermes
+    from terminus.agent_client import HermesClient
+    fake = FakeHermes(replies=["[]", "[]"])
+    app = TerminusApp(config=config, db=Database(":memory:"), clock=clock,
+                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
+    async with app.run_test(size=(120, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.press("6", "u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert len(fake.requests) == 2 and not app._agent_busy  # retried once
+        assert "No job-related emails in the last 14 days." in app.query_one(".agent-reply").source
+
+
+def test_import_jobs_cli(tmp_path, monkeypatch, capsys):
+    from terminus.app import main
+    monkeypatch.setenv("TERMINUS_DB", str(tmp_path / "t.db"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    csv = tmp_path / "t.csv"
+    csv.write_text("Company,Role,Status\nNorthwind,Quant Intern,Interview\n")
+    main(["import-jobs", str(csv), "--dry-run"])
+    assert "Would add 1:" in capsys.readouterr().out
+    main(["import-jobs", str(csv)])
+    out = capsys.readouterr().out
+    assert "Added 1:" in out and "Northwind — Quant Intern · interview" in out
+    assert Database(tmp_path / "t.db").find_job("Northwind").stage == "interview"

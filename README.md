@@ -156,6 +156,43 @@ reachable, the page shows the headlines on their own.
 Hermes is told to treat email content as information and never to follow instructions
 found inside an email. Give its email access read-only permissions where you can.
 
+## Job tracker (`6`)
+
+Your job applications, stored in Terminus' own database. Each one has a stage: saved,
+applied, screening, interview, offer, rejected or withdrawn. The list is sorted by the
+next dated step, and rejected or withdrawn applications are hidden until you press `h`.
+Every stage change is recorded.
+
+| Key | Action |
+|---|---|
+| `a` / `e` or `enter` | Add / edit an application (company, role, stage, dates, next step, link, notes) |
+| `s` | Change the stage |
+| `o` | Open the link in your browser |
+| `h` | Show or hide closed applications |
+| `d d` | Delete |
+| `u` | **Check email with Hermes** |
+
+**`u` (check email):** Hermes searches your Gmail with its own read-only tools and labels
+each email (company, role, stage, or "not my application"). Terminus then works out the
+changes against your tracker, in plain code, so the model can't invent entries. Terminus
+never moves an application backwards because of an older email, and a closed application
+stays closed. The proposed changes appear in the usual `space` / `y` / `n` panel. The
+first check looks back 14 days, and later checks look back to the previous one. Results
+vary a little from run to run (it's a 20B model), so check what you tick. Running `u`
+again only proposes what's still missing.
+
+**Import your Google Sheet:** in Sheets, choose File → Download → CSV, then:
+```bash
+.venv/bin/terminus import-jobs ~/Downloads/tracker.csv --dry-run   # preview
+.venv/bin/terminus import-jobs ~/Downloads/tracker.csv
+```
+Columns are matched by name (Company/Employer, Role/Position, Status/Stage, Date
+applied, Link, Notes, Next step). Free-text statuses such as "Interview scheduled" map
+onto the stages. Dates are read UK-style, day first. Rows you already track are skipped.
+
+Hermes also sees your active applications in chat, where it can propose `job_add` and
+`job_update` changes, and in the morning brief, which gets a short **Job hunt** section.
+
 ## Keys
 
 | Key | Where | Action |
@@ -169,6 +206,7 @@ found inside an email. Give its email access read-only permissions where you can
 | `ctrl+l` | Agent | Start a new conversation |
 | `space` / `y` / `n` | proposed changes | Toggle one / apply the ticked ones / discard all |
 | `5` | anywhere | Morning brief |
+| `6` | anywhere | Job tracker |
 | `g` | Brief | Ask Hermes for the brief again |
 | `r` | anywhere | Sync with Todoist now (only when a token is set) |
 | `q` | anywhere | Quit |

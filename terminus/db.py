@@ -11,7 +11,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from terminus.models import Session, Task
+from terminus.models import STAGES, Job, Session, Task
 
 MIGRATIONS = [
     # v1
@@ -87,6 +87,30 @@ MIGRATIONS = [
         by_hermes  INTEGER NOT NULL
     );
     """,
+    # v6: job applications, with a history of stage changes
+    """
+    CREATE TABLE jobs (
+        id         INTEGER PRIMARY KEY,
+        company    TEXT NOT NULL,
+        role       TEXT NOT NULL DEFAULT '',
+        stage      TEXT NOT NULL DEFAULT 'applied',
+        applied_on TEXT,
+        next_step  TEXT NOT NULL DEFAULT '',
+        next_date  TEXT,
+        link       TEXT NOT NULL DEFAULT '',
+        email_ref  TEXT,
+        notes      TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_jobs_email ON jobs(email_ref) WHERE email_ref IS NOT NULL;
+    CREATE TABLE job_history (
+        id     INTEGER PRIMARY KEY,
+        job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        stage  TEXT NOT NULL,
+        at     TEXT NOT NULL
+    );
+    """,
 ]
 
 
@@ -105,6 +129,36 @@ def _task(row: sqlite3.Row) -> Task:
         overdue_from=date.fromisoformat(row["overdue_from"]) if row["overdue_from"] else None,
         no_due=bool(row["no_due"]),
     )
+
+
+def _job(row: sqlite3.Row) -> Job:
+    return Job(
+        id=row["id"],
+        company=row["company"],
+        role=row["role"],
+        stage=row["stage"],
+        applied_on=date.fromisoformat(row["applied_on"]) if row["applied_on"] else None,
+        next_step=row["next_step"],
+        next_date=date.fromisoformat(row["next_date"]) if row["next_date"] else None,
+        link=row["link"],
+        email_ref=row["email_ref"],
+        notes=row["notes"],
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
+JOB_FIELDS = ("company", "role", "stage", "applied_on", "next_step", "next_date", "link",
+              "email_ref", "notes")
+
+
+def _job_value(field: str, value):
+    if field in ("applied_on", "next_date"):
+        return value.isoformat() if value else None
+    if field == "stage" and value not in STAGES:
+        raise ValueError(f"unknown stage {value!r}")
+    if field == "email_ref":
+        return value or None
+    return value if value is not None else ""
 
 
 def _session(row: sqlite3.Row) -> Session:
@@ -333,6 +387,90 @@ class Database:
         for s in map(_session, rows):
             worked[s.task_id] += s.elapsed(now)
         return dict(worked)
+
+    # ── small settings (key/value) ───────────────────────────────────────
+
+    def get_state(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM sync_state WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_state(self, key: str, value: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO sync_state (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+
+    # ── job applications ─────────────────────────────────────────────────
+
+    def add_job(self, company: str, *, now: datetime, **fields) -> int:
+        fields["company"] = company
+        unknown = set(fields) - set(JOB_FIELDS)
+        if unknown:
+            raise TypeError(f"unknown job fields: {sorted(unknown)}")
+        fields.setdefault("stage", "applied")
+        cols = list(fields)
+        stamp = now.isoformat(timespec="seconds")
+        with self.conn:
+            cur = self.conn.execute(
+                f"INSERT INTO jobs ({', '.join(cols)}, created_at, updated_at)"
+                f" VALUES ({', '.join('?' * len(cols))}, ?, ?)",
+                [_job_value(c, fields[c]) for c in cols] + [stamp, stamp],
+            )
+            self.conn.execute("INSERT INTO job_history (job_id, stage, at) VALUES (?, ?, ?)",
+                              (cur.lastrowid, fields["stage"], stamp))
+        return cur.lastrowid
+
+    def update_job(self, job_id: int, *, now: datetime, **fields) -> None:
+        """Change some fields; a stage change is also recorded in the history."""
+        unknown = set(fields) - set(JOB_FIELDS)
+        if unknown:
+            raise TypeError(f"unknown job fields: {sorted(unknown)}")
+        if not fields:
+            return
+        before = self.get_job(job_id)
+        stamp = now.isoformat(timespec="seconds")
+        sets = ", ".join(f"{c} = ?" for c in fields)
+        with self.conn:
+            self.conn.execute(
+                f"UPDATE jobs SET {sets}, updated_at = ? WHERE id = ?",
+                [_job_value(c, v) for c, v in fields.items()] + [stamp, job_id],
+            )
+            if before and "stage" in fields and fields["stage"] != before.stage:
+                self.conn.execute("INSERT INTO job_history (job_id, stage, at) VALUES (?, ?, ?)",
+                                  (job_id, fields["stage"], stamp))
+
+    def delete_job(self, job_id: int) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+
+    def get_job(self, job_id: int) -> Job | None:
+        row = self.conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        return _job(row) if row else None
+
+    def list_jobs(self, *, include_closed: bool = True) -> list[Job]:
+        where = "" if include_closed else "WHERE stage NOT IN ('rejected', 'withdrawn')"
+        return [_job(r) for r in self.conn.execute(f"SELECT * FROM jobs {where} ORDER BY id")]
+
+    def find_job(self, company: str, role: str = "") -> Job | None:
+        """Case-insensitive match on company and role (an empty role matches any)."""
+        for job in self.list_jobs():
+            if job.company.strip().lower() == company.strip().lower() and (
+                not role or not job.role or job.role.strip().lower() == role.strip().lower()
+            ):
+                return job
+        return None
+
+    def job_by_email_ref(self, ref: str) -> Job | None:
+        row = self.conn.execute("SELECT * FROM jobs WHERE email_ref = ?", (ref,)).fetchone()
+        return _job(row) if row else None
+
+    def job_history(self, job_id: int) -> list[tuple[str, datetime]]:
+        rows = self.conn.execute(
+            "SELECT stage, at FROM job_history WHERE job_id = ? ORDER BY at, id", (job_id,)
+        )
+        return [(stage, datetime.fromisoformat(at)) for stage, at in rows]
 
     # ── morning brief ────────────────────────────────────────────────────
 

@@ -22,12 +22,14 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, time, timedelta
 
-from terminus.models import Task
+from terminus.jobs_import import map_stage
+from terminus.models import STAGES, Job, Task
 from terminus.quickadd import parse_time
 
 FENCE = "```terminus-actions"
 BLOCK_RE = re.compile(r"```terminus-actions\s*\n(.*?)(?:```|\Z)", re.S)
-OPS = ("add", "done", "schedule", "edit", "delete")
+OPS = ("add", "done", "schedule", "edit", "delete", "job_add", "job_update")
+JOB_TEXT = ("role", "next_step", "link", "notes")
 MAX_ESTIMATE = 12
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -42,15 +44,24 @@ Terminus; nothing changes until they do. To propose changes, end your reply with
  {{"op": "done", "task": 12}},
  {{"op": "schedule", "task": 12, "day": "tomorrow", "at": "09:00"}},
  {{"op": "edit", "task": 12, "title": "…", "estimate": 2, "tags": ["…"]}},
- {{"op": "delete", "task": 12}}]
+ {{"op": "delete", "task": 12}},
+ {{"op": "job_add", "company": "…", "role": "…", "stage": "applied", "applied_on": "YYYY-MM-DD", \
+"next_step": "…", "next_date": "YYYY-MM-DD", "link": "https://…", "email_ref": "<gmail message id>"}},
+ {{"op": "job_update", "job": 3, "stage": "interview", "next_step": "…", "next_date": "YYYY-MM-DD"}}]
 ```
 
 Rules: "task" is the number shown as [#N] next to a task above. "estimate" is a count of \
 25-minute pomodoros (1–{MAX_ESTIMATE}). In "add", only "title" is required; "day" \
 defaults to today. In "schedule", give "day" and/or "at"; "at": null removes a pinned \
 time; scheduling an overdue or undated task for today puts it back on the timeline. \
-Never schedule in the past. Only propose changes the user asked for or clearly agreed \
-to, and describe them in plain words before the block. No block if nothing should change."""
+Never schedule in the past. Job applications are shown as [J#N]; "job" is that number. \
+Stages: {", ".join(STAGES)}. For a job email, first check whether the application is \
+already listed and use job_update rather than job_add; always set "email_ref" to the Gmail \
+message id on job_add. Only include what the email actually says: leave "role" out if the \
+position isn't named, and leave "next_step"/"next_date" out unless the email gives a concrete \
+next step or date — never invent follow-ups. A reminder to finish an application is stage \
+"saved", not "applied". Only propose changes the user asked for or clearly agreed to, and \
+describe them in plain words before the block. No block if nothing should change."""
 
 
 @dataclass
@@ -64,6 +75,8 @@ class Change:
     unpin: bool = False
     estimate: int | None = None
     tags: list[str] | None = None
+    job_id: int | None = None
+    job_fields: dict = field(default_factory=dict)  # job_add / job_update columns
 
 
 @dataclass
@@ -121,6 +134,85 @@ def extract(text: str) -> tuple[str, list | None, str | None]:
     return prose, data, None
 
 
+def parse_email_list(text: str) -> list[dict]:
+    """The JSON array of emails Hermes returns in step 1 of a job scan.
+
+    Tolerates prose or code fences around the array. Raises ValueError if there
+    isn't one.
+    """
+    start, end = text.find("["), text.rfind("]")
+    if start == -1 or end < start:
+        raise ValueError("Hermes didn't return an email list")
+    try:
+        data = json.loads(text[start : end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"the email list wasn't valid JSON ({exc.msg})") from None
+    emails = [e for e in data if isinstance(e, dict) and (e.get("subject") or e.get("summary"))]
+    for e in emails:
+        e["id"] = str(e.get("id") or "").strip()
+        for key in ("from", "subject", "date", "summary"):
+            e[key] = " ".join(str(e.get(key) or "").split())[:300]  # one line each
+    return emails
+
+
+#: Pipeline order for "don't move backwards"; closing stages are always allowed.
+PROGRESS = {"saved": 0, "applied": 1, "screening": 2, "interview": 3, "offer": 4}
+
+
+def job_entries_from_emails(emails: list[dict], jobs: dict[int, Job]) -> list[dict]:
+    """Turn Hermes' labelled email list into job_add / job_update entries.
+
+    Deterministic on purpose: the model only labels each email (company, role,
+    stage); matching against the tracker happens here, so it can't invent entries.
+    Emails are handled oldest first, so the newest word on an application wins.
+    """
+    entries: list[dict] = []
+    pending: dict[tuple[str, str], dict] = {}  # this batch's job_add entries by (company, role)
+    state = {j.id: j.stage for j in jobs.values()}
+
+    for e in sorted(emails, key=lambda e: e.get("date") or ""):
+        raw_stage = str(e.get("stage") or "").strip().lower()
+        company = str(e.get("company") or "").strip()
+        if not company or raw_stage in ("", "none", "null", "n/a", "not_application", "ignore"):
+            continue
+        stage = _stage(raw_stage)
+        role = str(e.get("role") or "").strip()
+        if PLACEHOLDER.match(role) or "application" in role.lower():
+            role = ""  # "Application", "HR Application"… describe the email, not a position
+        ref = e.get("id") or None
+
+        job = next((j for j in jobs.values() if ref and j.email_ref == ref), None) or next(
+            (j for j in jobs.values() if j.company.lower() == company.lower()
+             and (not role or not j.role or j.role.lower() == role.lower())), None)
+        if job is not None:
+            current = state[job.id]
+            if job.closed or current == stage:
+                continue
+            if stage in PROGRESS and PROGRESS.get(stage, 0) <= PROGRESS.get(current, 0):
+                continue  # an older-news email; don't move the application backwards
+            state[job.id] = stage
+            entries = [x for x in entries if x.get("job") != job.id]  # newest update wins
+            entries.append({"op": "job_update", "job": job.id, "stage": stage})
+            continue
+
+        key = (company.lower(), role.lower())
+        existing = pending.get(key) or next(
+            (v for (c, r), v in pending.items() if c == key[0] and (not r or not key[1])), None)
+        if existing is not None:  # another email about an application found in this batch
+            if stage not in PROGRESS or PROGRESS[stage] > PROGRESS.get(existing["stage"], 0):
+                existing["stage"] = stage
+            existing["role"] = existing.get("role") or role
+            continue
+        entry = {"op": "job_add", "company": company, "stage": stage, "email_ref": ref}
+        if role:
+            entry["role"] = role
+        if stage != "saved" and e.get("date"):
+            entry["applied_on"] = e["date"]
+        pending[key] = entry
+        entries.append(entry)
+    return entries
+
+
 def parse_day(value, today: date) -> date:
     text = str(value).strip().lower()
     if text in ("today", ""):
@@ -159,11 +251,22 @@ def _tags(value) -> list[str]:
     return [str(t).lstrip("#").lower() for t in value if str(t).strip()]
 
 
-def validate(entries: list, tasks: dict[int, Task], *, today: date, now_time: time) -> Proposal:
-    """Check each proposed entry against the current tasks. Never raises."""
+def validate(
+    entries: list,
+    tasks: dict[int, Task],
+    *,
+    today: date,
+    now_time: time,
+    jobs: dict[int, Job] | None = None,
+) -> Proposal:
+    """Check each proposed entry against the current tasks and jobs. Never raises."""
     proposal = Proposal()
+    jobs = jobs or {}
     for i, entry in enumerate(entries, 1):
         try:
+            if isinstance(entry, dict) and str(entry.get("op", "")).startswith("job_"):
+                proposal.changes.append(_job_change(entry, jobs, today))
+                continue
             proposal.changes.append(_one(entry, tasks, today, now_time))
         except (ValueError, TypeError, KeyError) as exc:
             label = entry.get("op", "?") if isinstance(entry, dict) else "?"
@@ -241,3 +344,79 @@ def _one(entry, tasks: dict[int, Task], today: date, now_time: time) -> Change:
         raise ValueError(f"nothing to change on {name}")
     return Change("edit", f"Edit {name} · {', '.join(diffs)}", task_id=task.id, title=title,
                   estimate=est, tags=tags)
+
+
+def _stage(value) -> str:
+    text = str(value).strip().lower()
+    return text if text in STAGES else map_stage(text)
+
+
+def _job_date(value, today: date) -> date | None:
+    return parse_day(value, today) if value not in (None, "") else None
+
+
+#: Filler the model sometimes writes instead of leaving a field out.
+PLACEHOLDER = re.compile(r"^\W*(unknown|n/?a|none|tbc|tbd|not (specified|stated|given)|"
+                         r"position unknown|role unknown|unspecified|-+)\W*$", re.I)
+
+
+def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
+    fields: dict = {}
+    for key in JOB_TEXT:
+        if entry.get(key) is not None:
+            value = str(entry[key]).strip()
+            if not PLACEHOLDER.match(value):
+                fields[key] = value
+    if fields.get("link") and not fields["link"].startswith(("http://", "https://")):
+        raise ValueError(f"link {fields['link']!r} isn't a web address")
+    if entry.get("stage") is not None:
+        fields["stage"] = _stage(entry["stage"])
+    for key in ("applied_on", "next_date"):
+        if key in entry:
+            fields[key] = _job_date(entry[key], today)
+
+    def describe(f: dict) -> str:
+        bits = []
+        if f.get("next_step") or f.get("next_date"):
+            when = f"{f['next_date']:%a %d %b}" if f.get("next_date") else ""
+            bits.append("next: " + " ".join(filter(None, [when, f.get("next_step", "")])))
+        return " · ".join(bits)
+
+    if entry["op"] == "job_add":
+        company = str(entry.get("company") or "").strip()
+        if not company:
+            raise ValueError("needs a company")
+        ref = str(entry.get("email_ref") or "").strip() or None
+        for job in jobs.values():
+            if ref and job.email_ref == ref:
+                raise ValueError(f"that email is already tracked as [J#{job.id}] {job.label}")
+            same_role = not fields.get("role") or not job.role or \
+                job.role.lower() == fields["role"].lower()
+            if job.company.lower() == company.lower() and same_role:
+                raise ValueError(f"already tracked as [J#{job.id}] {job.label} — use job_update")
+        fields.setdefault("stage", "applied")
+        if fields["stage"] != "saved":
+            fields.setdefault("applied_on", today)
+        fields["email_ref"] = ref
+        label = f"{company} — {fields['role']}" if fields.get("role") else company
+        extra = " · ".join(filter(None, [fields["stage"].capitalize(), describe(fields)]))
+        return Change("job_add", f"Track job “{label}” · {extra}",
+                      job_fields={"company": company, **fields})
+
+    try:
+        job = jobs[int(entry["job"])]
+    except (KeyError, ValueError, TypeError):
+        raise ValueError(f"no job [J#{entry.get('job')}]") from None
+    changed = {k: v for k, v in fields.items() if getattr(job, k) != v}
+    if not changed:
+        raise ValueError(f"nothing to change on {job.label}")
+    diffs = []
+    if "stage" in changed:
+        diffs.append(f"{job.stage.capitalize()} → {changed['stage'].capitalize()}")
+    if next_bits := describe(changed):
+        diffs.append(next_bits)
+    others = sorted(set(changed) - {"stage", "next_step", "next_date"})
+    if others:
+        diffs.append("edits " + ", ".join(k.replace("_", " ") for k in others))
+    return Change("job_update", f"Update job “{job.label}” · {' · '.join(diffs)}",
+                  job_id=job.id, job_fields=changed)

@@ -8,9 +8,11 @@ import httpx
 
 
 class FakeHermes:
-    def __init__(self, key: str = "hermes-key", reply: str = "Sure — start with **Find a job**.") -> None:
+    def __init__(self, key: str = "hermes-key", reply: str = "Sure — start with **Find a job**.",
+                 replies: list[str] | None = None) -> None:
         self.key = key
         self.reply = reply
+        self.replies = list(replies or [])  # one per request, then falls back to `reply`
         self.online = True
         self.tool_events = True
         self.requests: list[dict] = []
@@ -25,10 +27,11 @@ class FakeHermes:
             return httpx.Response(401, json={"error": {"message": "invalid key"}})
         body = json.loads(request.content)
         self.requests.append(body)
+        reply = self.replies.pop(0) if self.replies else self.reply
         chunks = [": keepalive\n\n"]
         if self.tool_events:
             chunks.append('event: hermes.tool.progress\ndata: {"tool": "terminal", "status": "running"}\n\n')
-        for word in self.reply.split(" "):
+        for word in reply.split(" "):
             delta = {"choices": [{"delta": {"content": word + " "}, "index": 0}]}
             chunks.append(f"data: {json.dumps(delta)}\n\n")
         chunks.append("data: [DONE]\n\n")

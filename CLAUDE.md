@@ -44,6 +44,12 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
   and `raw_digest()` (headlines only) is the fallback when Hermes is unreachable. One row
   per day in `briefs`. It runs automatically after `config.brief_time`; tests set
   `brief_time=None` so they never touch the network.
+- Jobs: the `jobs` and `job_history` tables (v6), `Job` in models.py, and
+  `widgets/jobs_view.py`. `jobs_import.py` handles CSV import (`terminus import-jobs`). The
+  email scan (`TerminusApp._scan_jobs`) is ONE Hermes call that returns labelled email
+  JSON (`actions.parse_email_list`). `actions.job_entries_from_emails` then matches it to
+  the tracker **deterministically**: gpt-oss:20b invented tracker entries when asked to do
+  the matching itself, so keep that step in code.
 - `terminus/stats.py` computes the numbers and `widgets/stats_view.py` renders them. Stats
   are recomputed only while the Stats view is visible.
 - Sessions: `task_id` NULL means free focus. `ON DELETE SET NULL` keeps logged time when a

@@ -1,4 +1,7 @@
+import sqlite3
 from datetime import datetime, time, timedelta
+
+import pytest
 
 from conftest import DAY
 
@@ -109,3 +112,28 @@ def test_carry_over_marks_overdue_since_original_day(db):
     db.carry_over(DAY)
     task = db.get_task(t)
     assert task.day == DAY and task.overdue_from == DAY - timedelta(days=3)
+
+
+def test_jobs_crud_and_history(db):
+    from datetime import date
+    now = at(9)
+    j = db.add_job("Northwind", role="Quant Research Intern", applied_on=date(2026, 9, 12),
+                   email_ref="msg-1", now=now)
+    job = db.get_job(j)
+    assert (job.stage, job.applied_on, job.label) == ("applied", date(2026, 9, 12),
+                                                       "Northwind — Quant Research Intern")
+    db.update_job(j, stage="interview", next_step="Interview", next_date=date(2026, 9, 30),
+                  now=at(10))
+    db.update_job(j, notes="bring CV", now=at(11))  # no stage change → no history row
+    assert [s for s, _ in db.job_history(j)] == ["applied", "interview"]
+    assert db.find_job("northwind", "quant research intern").id == j
+    assert db.find_job("Northwind").id == j and db.find_job("Acme") is None
+    assert db.job_by_email_ref("msg-1").id == j
+    db.update_job(j, stage="rejected", now=at(12))
+    assert db.list_jobs(include_closed=False) == [] and len(db.list_jobs()) == 1
+    with pytest.raises(ValueError):
+        db.update_job(j, stage="ghosted", now=at(13))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.add_job("Other", email_ref="msg-1", now=now)
+    db.delete_job(j)
+    assert db.get_job(j) is None and db.job_history(j) == []
