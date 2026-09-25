@@ -302,7 +302,8 @@ async def test_brief_auto_generates_with_hermes(config, clock, fake_gather):
         await pilot.pause()
         created, markdown, by_hermes = app.db.get_brief(clock.now.date())
         assert by_hermes and "Start with **Write**." in markdown
-        assert "<emails>" in fake.requests[-1]["messages"][1]["content"]
+        system, user = fake.requests[-1]["messages"]
+        assert "Gmail inbox" in system["content"] and "<headlines>" in user["content"]
         assert "Morning brief ready" in str(app.query_one("#today-brief").render())
         await pilot.press("5")
         assert app.current_view == "brief"
@@ -321,5 +322,5 @@ async def test_brief_falls_back_to_raw_digest_without_hermes(config, clock, fake
         await app.workers.wait_for_complete()
         await pilot.pause()
         _, markdown, by_hermes = app.db.get_brief(clock.now.date())
-        assert not by_hermes and "Connect Hermes" in markdown and "Interview Tuesday?" in markdown
-        assert "raw digest" in str(app.query_one("#brief-status").render())
+        assert not by_hermes and "connect Hermes" in markdown and "Fed signals pause" in markdown
+        assert "headlines only" in str(app.query_one("#brief-status").render())

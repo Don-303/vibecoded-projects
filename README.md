@@ -118,40 +118,29 @@ minute.
 
 ## Morning brief (`5`)
 
-On the first launch each day after 06:00, Terminus prepares a brief with three sections:
+On the first launch each day after 06:00, Terminus asks your Hermes agent for a morning
+brief with three sections:
 - **Today:** your plan, and what to start with.
-- **Email:** the Gmail messages from the last day (Primary tab) that need attention.
-- **Markets & finance:** headlines from CNBC, the FT and Investing.com, with each feed
-  getting a fair share.
+- **Email:** Hermes checks your Gmail **with its own email tools** and lists what needs
+  attention: who wants what, and by when.
+- **Markets & finance:** the main finance news. Terminus includes recent headlines from
+  CNBC, the FT and Investing.com as a starting point, and Hermes can search for more.
 
-Hermes writes it up as a short summary, streamed onto the page. Without Hermes you get
-the raw digest instead. A "☀ Morning brief ready" line on Today stays until you open the
-brief. Press `g` on the Brief page to make it again.
+**Terminus never touches your email.** Email access is set up in Hermes, on the Hermes
+machine. The brief streams onto the page, and a "☀ Morning brief ready" line on Today
+stays until you open it. Press `g` on the Brief page to ask again. When Hermes isn't
+reachable, the page shows the headlines on their own.
 
-**Gmail is read-only.** Terminus opens your inbox with IMAP `EXAMINE` and reads messages
-with `BODY.PEEK`, so it can't send, delete, move or even mark anything as read. It signs
-in with a Google **app password**, not your real password:
+```toml
+[brief]
+# time = "06:00"   # "" = only when you press g
+# email = true     # false: don't ask Hermes about email
+# [brief.feeds]    # replace the default finance feeds
+# "FT Markets" = "https://www.ft.com/markets?format=rss"
+```
 
-1. Turn on 2-Step Verification for your Google account, if it isn't on already.
-2. Go to <https://myaccount.google.com/apppasswords>, create one called "Terminus",
-   and copy the 16 characters.
-3. Add it to `~/.config/terminus/config.toml` (keep the file `chmod 600`):
-   ```toml
-   [gmail]
-   address = "you@gmail.com"
-   app_password = "abcd efgh ijkl mnop"
-   # query = "newer_than:1d category:primary"   # any Gmail search
-
-   [brief]
-   # time = "06:00"                 # "" = only when you press g
-   # [brief.feeds]                  # replace the default finance feeds
-   # "FT Markets" = "https://www.ft.com/markets?format=rss"
-   ```
-
-Emails and headlines go to Hermes marked as untrusted data, and it's told never to follow
-instructions inside them. Hermes can still run commands on its machine, so consider a
-Hermes profile with the terminal tool turned off for the brief (set `model = "<profile>"`
-under `[hermes]`).
+Hermes is told to treat email content as information and never to follow instructions
+found inside an email. Give its email access read-only permissions where you can.
 
 ## Keys
 
@@ -165,7 +154,7 @@ under `[hermes]`).
 | `/` | anywhere | Agent view, cursor in the chat box |
 | `ctrl+l` | Agent | Start a new conversation |
 | `5` | anywhere | Morning brief |
-| `g` | Brief | Make the brief again |
+| `g` | Brief | Ask Hermes for the brief again |
 | `r` | anywhere | Sync with Todoist now (only when a token is set) |
 | `q` | anywhere | Quit |
 | `a` | Tasks | Quick-add bar |
@@ -207,7 +196,6 @@ project = "Inbox"
 | `HERMES_HOST` | `127.0.0.1` | Hermes machine (IP, hostname or URL; port 8642 assumed) |
 | `HERMES_API_KEY` | none | Hermes `API_SERVER_KEY`; without it the chat shows setup help |
 | `HERMES_MODEL` | `hermes-agent` | Model name sent to Hermes (your Hermes profile name) |
-| `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` | none | Gmail for the morning brief (read-only IMAP) |
 
 ## Tests
 

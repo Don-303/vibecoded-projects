@@ -441,22 +441,17 @@ class TerminusApp(App):
         cfg = self.config
         day = self._day
         try:
-            view.set_status("Gathering email and news…", busy=True)
-            inputs = await brief.gather(
-                now=self.now(),
-                gmail_address=cfg.gmail_address,
-                gmail_password=cfg.gmail_app_password,
-                gmail_query=cfg.gmail_query,
-                feeds=cfg.brief_feeds or brief.FINANCE_FEEDS,
-            )
+            view.set_status("Fetching headlines…", busy=True)
+            inputs = await brief.gather(now=self.now(), feeds=cfg.brief_feeds or brief.FINANCE_FEEDS)
             markdown, by_hermes, note = None, False, ""
             if self.hermes.api_key:
                 view.show(brief.raw_digest(inputs))  # something to read while Hermes writes
-                view.set_status("Hermes is writing your brief…", busy=True)
+                view.set_status("Hermes is checking your email and writing the brief…", busy=True)
                 markdown, note = await self._write_brief(view, inputs)
                 by_hermes = markdown is not None
             else:
-                note = "Connect Hermes ([4] AI Agent) to get this written up as a short brief."
+                note = ("Headlines only — connect Hermes ([4] AI Agent) for the full brief "
+                        "with your email.")
             if markdown is None:
                 markdown = brief.raw_digest(inputs, note=note)
             self.db.save_brief(day, markdown, by_hermes, self.now())
@@ -470,7 +465,7 @@ class TerminusApp(App):
 
     async def _write_brief(self, view: BriefView, inputs: brief.BriefInputs) -> tuple[str | None, str]:
         """Stream Hermes' write-up into the view. Returns (markdown or None, note)."""
-        messages = brief.build_messages(inputs, self._agent_context())
+        messages = brief.build_messages(inputs, self._agent_context(), email=self.config.brief_email)
         stream: MarkdownStream | None = None
         text = ""
         try:
@@ -483,7 +478,7 @@ class TerminusApp(App):
                 text += event.text
                 await stream.write(event.text)
         except HermesError as exc:
-            return None, f"Hermes couldn't write the brief ({exc}) — showing the raw digest."
+            return None, f"Hermes couldn't write the brief ({exc}) — showing headlines only."
         finally:
             if stream is not None:
                 await stream.stop()
@@ -501,7 +496,7 @@ class TerminusApp(App):
         else:
             created, markdown, by_hermes = stored
             view.show(markdown)
-            who = "by Hermes" if by_hermes else "raw digest"
+            who = "by Hermes" if by_hermes else "headlines only"
             view.set_status(f"{who} · {created:%H:%M} · g to regenerate")
         self._update_brief_banner()
 

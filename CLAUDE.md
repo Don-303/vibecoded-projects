@@ -38,12 +38,12 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
   streaming; named events become "tool" events; `/health` needs no auth). History is kept
   client-side in `TerminusApp._chat`, and a fresh system message from `build_context()` is
   sent every turn. Tests use `tests/fake_hermes.py`.
-- `terminus/brief.py`: the morning brief. `gather()` reads Gmail over read-only IMAP
-  (EXAMINE and BODY.PEEK only; keep it that way) and the RSS feeds, and
-  `build_messages()` fences them off as untrusted data for Hermes. `raw_digest()` is the
-  fallback without Hermes. One row per day in `briefs`. It runs automatically after
-  `config.brief_time`; tests set `brief_time=None` so they never touch the network. Tests
-  use `tests/fake_imap.py` and httpx MockTransport.
+- `terminus/brief.py`: the morning brief. **Terminus must never read email itself**; the
+  user wants Hermes to handle Gmail with its own tools. `gather()` fetches only public
+  finance RSS headlines. `build_messages()` asks Hermes to check email and write the brief,
+  and `raw_digest()` (headlines only) is the fallback when Hermes is unreachable. One row
+  per day in `briefs`. It runs automatically after `config.brief_time`; tests set
+  `brief_time=None` so they never touch the network.
 - `terminus/stats.py` computes the numbers and `widgets/stats_view.py` renders them. Stats
   are recomputed only while the Stats view is visible.
 - Sessions: `task_id` NULL means free focus. `ON DELETE SET NULL` keeps logged time when a
