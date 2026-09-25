@@ -21,7 +21,8 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from terminus.models import BlockState, DayPlan
+from terminus.actions import PROTOCOL
+from terminus.models import BlockState, DayPlan, Task
 from terminus.widgets.timeline import fmt_duration
 
 DEFAULT_PORT = 8642
@@ -172,8 +173,20 @@ def build_context(
     focus_today: timedelta,
     streak: int,
     focus_task: str | None,
+    upcoming: list[Task] = (),
+    actions: bool = False,
 ) -> str:
-    """The system message: who the agent is talking to and what their day looks like."""
+    """The system message: who the agent is talking to and what their day looks like.
+
+    Tasks carry their ids (``[#12]``) so proposed changes can refer to them. With
+    ``actions``, the agent is told how to propose changes (see terminus.actions).
+    """
+    def est(t: Task) -> str:
+        return f"~{t.estimate} pomodoro{'s' if t.estimate != 1 else ''}"
+
+    def tags(t: Task) -> str:
+        return "".join(f" #{tag}" for tag in t.tags)
+
     lines = [
         "You are the planning assistant inside Terminus, the user's terminal day planner "
         "and focus timer. Be concise; the reply is shown in a narrow terminal pane "
@@ -191,31 +204,35 @@ def build_context(
             extra.append("pinned")
         if b.state is BlockState.RUNNING:
             extra.append(f"{b.progress:.0%} done")
-        tags = " ".join(f"#{tag}" for tag in t.tags)
         lines.append(
-            f"- {b.start:%H:%M}–{b.end:%H:%M} [{b.state.value}] {t.title} "
-            f"(~{t.estimate} pomodoro{'s' if t.estimate != 1 else ''})"
-            + (f" {tags}" if tags else "")
-            + (f" ({', '.join(extra)})" if extra else "")
+            f"- [#{t.id}] {b.start:%H:%M}–{b.end:%H:%M} [{b.state.value}] {t.title} ({est(t)})"
+            + tags(t) + (f" ({', '.join(extra)})" if extra else "")
         )
     if plan.overdue:
         lines += ["", "Overdue / undated (not on the timeline):"]
         for t in plan.overdue:
             since = "no date" if t.no_due else f"overdue since {t.overdue_from:%b %d}"
-            lines.append(f"- {t.title} ({since})")
+            lines.append(f"- [#{t.id}] {t.title} ({since}, {est(t)}){tags(t)}")
     if plan.overflow:
-        lines += ["", "Won't fit today:"] + [f"- {t.title}" for t in plan.overflow]
+        lines += ["", "Won't fit today:"] + [f"- [#{t.id}] {t.title} ({est(t)})" for t in plan.overflow]
+    if upcoming:
+        lines += ["", "Upcoming (next 7 days):"]
+        for t in upcoming:
+            at = f" {t.fixed_start:%H:%M}" if t.fixed_start else ""
+            lines.append(f"- [#{t.id}] {t.day:%a %d %b}{at} {t.title} ({est(t)}){tags(t)}")
     lines += [
         "",
         f"Focus logged today: {fmt_duration(focus_today)}. Streak: {streak} days. "
         f"Focus timer: {focus_task or 'off'}.",
         "",
-        "Every task listed above already exists in the planner — never tell the user to add "
-        "one of them again; for an overdue one, tell them to select it in Tasks [2] and press t. "
-        "You can't change the planner directly yet. If the user wants changes, say exactly "
-        "what to do in Terminus: n = new task (quick-add syntax `Title #tag ~N @HH:MM`, where "
-        "~N means N 25-minute pomodoros, not minutes, and @HH:MM is optional), space = mark "
-        "done, t = move an overdue task onto today, f = start focus, e = edit. Only suggest "
-        "times later than now.",
+        "Every task listed above already exists in the planner — never suggest adding one "
+        "of them again. Only suggest times later than now.",
     ]
+    if actions:
+        lines += ["", PROTOCOL]
+    else:
+        lines.append(
+            "To change the planner, the user presses keys in Terminus: n = new task, "
+            "space = done, t = move an overdue task onto today, f = focus, e = edit."
+        )
     return "\n".join(lines)

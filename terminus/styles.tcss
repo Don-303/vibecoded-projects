@@ -233,3 +233,29 @@ Footer {
     background: $background;
     padding: 0;
 }
+
+/* ── proposed changes ────────────────────────────────────── */
+
+.proposal {
+    height: auto;
+    margin: 1 0 0 5;
+    padding: 0 1;
+    border-left: thick $primary;
+    background: $surface;
+}
+
+.proposal-list {
+    height: auto;
+    max-height: 12;
+    background: $surface;
+    border: none;
+    padding: 0;
+}
+
+.proposal-list:focus {
+    border: none;
+}
+
+.proposal-rejected, .proposal-outcome {
+    height: auto;
+}

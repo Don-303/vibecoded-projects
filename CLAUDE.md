@@ -58,6 +58,10 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
 - Single-key app bindings are fine: focused `Input`s consume printable keys first
   (see `tests/test_app.py::test_typing_in_inputs_does_not_trigger_hotkeys`).
 - Actions that don't make sense while a modal is open go in `MAIN_SCREEN_ACTIONS`.
-- v3 (the agent proposes task changes, applied only after confirmation) is next. Hook it
-  into `TerminusApp._ask` and `agent_client.build_context`, whose system prompt currently
-  says the agent can't change the planner.
+- v3: `terminus/actions.py` defines the protocol. Hermes ends a reply with a
+  ```` ```terminus-actions ```` JSON block that refers to tasks by `[#id]` (ids are
+  listed in `build_context(actions=True)`; the brief uses `actions=False`). `VisibleFilter`
+  hides the block from the streamed text. `validate()` turns it into `Change`s or
+  rejection reasons and never touches the DB. `ProposalPanel` asks for confirmation, and
+  `TerminusApp._apply_change` applies ticked changes through the normal mutation paths,
+  including `_pushed` for Todoist.

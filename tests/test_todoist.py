@@ -282,3 +282,15 @@ async def test_undated_tasks_join_overdue_list_until_scheduled(db, fake, sync):
     fake.phone_edit(iid, due=None)  # date removed on the phone → back in the list
     await sync.sync()
     assert db.get_task(t.id).no_due
+
+
+async def test_first_sync_keeps_overdue_and_undated_state(db, fake, sync):
+    old = db.add_task("Old", DAY - timedelta(days=5))
+    db.carry_over(DAY)  # what the app does at startup: on today, overdue since Sep 20
+    undated = db.add_task("Someday", DAY, no_due=True)
+    await sync.sync()
+    assert fake.item_named("Old")["due"] == {"date": "2026-09-20"}
+    assert fake.item_named("Someday")["due"] is None
+    await sync.sync()  # the echo must not clear the flags
+    assert db.get_task(old).overdue_from == DAY - timedelta(days=5)
+    assert db.get_task(undated).no_due

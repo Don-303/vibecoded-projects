@@ -134,12 +134,12 @@ class TodoistSync:
         return (row[0] or row[1]) if row else None
 
     def _item_fields(self, task: Task) -> dict:
-        args = {
-            "content": task.title,
-            "labels": task.tags,
-            "due": format_due(task.day, task.fixed_start),
-        }
-        if task.estimate > 1:
+        args = {"content": task.title, "labels": task.tags}
+        # Keep backlog state: an overdue task stays due on its original day, an
+        # undated one gets no date (otherwise the echo would clear the flag).
+        if not task.no_due:
+            args["due"] = format_due(task.overdue_from or task.day, task.fixed_start)
+        if task.estimate > 1 and "due" in args:
             args["duration"] = {"amount": task.estimate * int(self.pomodoro.total_seconds() // 60),
                                 "unit": "minute"}
         return args

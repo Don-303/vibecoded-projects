@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Input, Markdown, OptionList
 from textual.widgets.markdown import MarkdownStream
 
-from terminus import brief, stats
+from terminus import actions, brief, stats
 from terminus.agent_client import HermesClient, HermesError, build_context
 from terminus.config import Config
 from terminus.db import Database
@@ -33,6 +33,7 @@ from terminus.widgets import (
     TodayView,
 )
 from terminus.widgets.brief_view import EMPTY as BRIEF_EMPTY
+from terminus.widgets.proposal_panel import ProposalPanel
 from terminus.widgets.timeline import fmt_duration
 
 #: Actions that make no sense while a modal (e.g. the task form) is open.
@@ -102,6 +103,7 @@ class TerminusApp(App):
         self._chat: list[dict] = []
         self._agent_busy = False
         self._briefing = False
+        self._proposal: ProposalPanel | None = None  # awaiting y/n
         self._brief_seen: object = None  # the day whose brief the user has opened
 
     # ── layout ───────────────────────────────────────────────────────────
@@ -355,7 +357,7 @@ class TerminusApp(App):
             busy=self._agent_busy,
         )
 
-    def _agent_context(self) -> str:
+    def _agent_context(self, *, actions: bool = False) -> str:
         now = self.now()
         active = self.db.active_session()
         task = self.db.get_task(active.task_id) if active and active.task_id else None
@@ -365,6 +367,8 @@ class TerminusApp(App):
             focus_today=self.db.focus_time_on(now.date(), now),
             streak=self.db.streak(now.date()),
             focus_task=(task.title if task else "free focus") if active else None,
+            upcoming=self.db.upcoming_tasks(self._day),
+            actions=actions,
         )
 
     @on(Input.Submitted, "#agent-input")
@@ -376,6 +380,10 @@ class TerminusApp(App):
             self.notify("Hermes is still answering…", severity="warning")
             return
         event.input.clear()
+        if self._proposal is not None:
+            self._proposal.decided = True
+            self._proposal.resolve("Superseded by your next message — nothing changed.", applied=False)
+            self._proposal = None
         self.query_one(AgentConsole).add_user(prompt)
         self._chat.append({"role": "user", "content": prompt})
         self._agent_busy = True
@@ -390,17 +398,22 @@ class TerminusApp(App):
         # CancelledError into this worker and skips the cleanup below.
         stream: MarkdownStream | None = None
         answer = ""
-        messages = [{"role": "system", "content": self._agent_context()}]
+        hide = actions.VisibleFilter()  # the proposed-changes block isn't shown as text
+        messages = [{"role": "system", "content": self._agent_context(actions=True)}]
         messages += self._chat[-CHAT_HISTORY:]
         try:
             async for event in self.hermes.stream_chat(messages):
                 if event.kind == "token":
                     answer += event.text
-                    stream = stream or Markdown.get_stream(reply)
-                    await stream.write(event.text)
+                    if visible := hide.feed(event.text):
+                        stream = stream or Markdown.get_stream(reply)
+                        await stream.write(visible)
                 else:
                     activity.update(Text(f"⚙ {event.text}", style=MUTED))
                 console.log_area.scroll_end(animate=False)
+            if rest := hide.flush():
+                stream = stream or Markdown.get_stream(reply)
+                await stream.write(rest)
             self._hermes_online = True
         except HermesError as exc:
             console.add_error(str(exc))
@@ -416,9 +429,101 @@ class TerminusApp(App):
             self._update_status(self.now())
         if answer:
             self._chat.append({"role": "assistant", "content": answer})
+            self._offer_changes(answer)
         else:
             self._chat.pop()  # unanswered: don't resend it as history next turn
             reply.remove()
+
+    # ── proposed changes (v3) ────────────────────────────────────────────
+
+    def _offer_changes(self, answer: str) -> None:
+        """If the reply proposes task changes, check them and ask the user to confirm."""
+        _, entries, error = actions.extract(answer)
+        console = self.query_one(AgentConsole)
+        if error:
+            console.add_error(error)
+        if not entries:
+            return
+        known = {t.id: t for t in self.db.tasks_for_day(self._day)}
+        known.update({t.id: t for t in self.db.upcoming_tasks(self._day)})
+        now = self.now()
+        proposal = actions.validate(entries, known, today=self._day, now_time=now.time())
+        panel = ProposalPanel(proposal)
+        console.log_area.mount(panel)
+        console.log_area.scroll_end(animate=False)
+        if proposal.changes:
+            self._proposal = panel
+        else:
+            panel.resolve("Hermes proposed changes, but none were valid — nothing to apply.",
+                          applied=False)
+
+    @on(ProposalPanel.Decided)
+    def _changes_decided(self, event: ProposalPanel.Decided) -> None:
+        self._proposal = None
+        chosen = [event.panel.proposal.changes[i] for i in event.selected] if event.apply else []
+        if not chosen:
+            event.panel.resolve("Discarded — nothing changed.", applied=False)
+            note = "(Terminus: the user discarded these proposed changes.)"
+        else:
+            done, failed = [], []
+            for change in chosen:
+                try:
+                    self._apply_change(change)
+                    done.append(change.summary)
+                except LookupError as exc:
+                    failed.append(f"{change.summary} ({exc})")
+            skipped = len(event.panel.proposal.changes) - len(chosen)
+            lines = [f"✓ {s}" for s in done] + [f"✗ {s}" for s in failed]
+            if skipped:
+                lines.append(f"({skipped} unticked, not applied)")
+            event.panel.resolve("\n".join(lines), applied=bool(done))
+            note = f"(Terminus: the user applied {len(done)} of {len(event.panel.proposal.changes)} "
+            note += "proposed changes.)"
+            self.refresh_all()
+        if self._chat and self._chat[-1]["role"] == "assistant":
+            self._chat[-1]["content"] += f"\n\n{note}"
+        self.query_one(AgentConsole).focus_input()
+
+    def _apply_change(self, c: actions.Change) -> None:
+        """Apply one confirmed change through the same paths as the keybindings."""
+        now = self.now()
+        if c.op == "add":
+            task_id = self.db.add_task(c.title, c.day, estimate=c.estimate, tags=c.tags,
+                                       fixed_start=c.at, now=now)
+            self._pushed(TodoistSync.queue_add, task_id)
+            return
+        task = self.db.get_task(c.task_id)
+        if task is None:
+            raise LookupError("task no longer exists")
+        active = self.db.active_session()
+        stop_focus = active is not None and active.task_id == task.id
+        if c.op == "done":
+            if stop_focus:
+                self.db.stop_session(now)
+            self.db.set_done(task.id, True, now)
+            self._pushed(TodoistSync.queue_done, task.id, True)
+        elif c.op == "delete":
+            if stop_focus:
+                self.db.stop_session(now)
+            self._pushed(TodoistSync.queue_delete, task.id)  # before the row goes
+            self.db.delete_task(task.id)
+        elif c.op == "schedule":
+            day = c.day or (self._day if task.backlogged else task.day)
+            fixed = None if c.unpin else (c.at or task.fixed_start)
+            self.db.update_task(task.id, title=task.title, estimate=task.estimate,
+                                tags=task.tags, fixed_start=fixed)
+            self.db.set_day(task.id, day)
+            self.db.set_overdue(task.id, None)
+            self._pushed(TodoistSync.queue_reschedule, task.id)
+        elif c.op == "edit":
+            self.db.update_task(
+                task.id,
+                title=c.title or task.title,
+                estimate=c.estimate if c.estimate is not None else task.estimate,
+                tags=c.tags if c.tags is not None else task.tags,
+                fixed_start=task.fixed_start,
+            )
+            self._pushed(TodoistSync.queue_update, task, self.db.get_task(task.id))
 
     # ── morning brief ────────────────────────────────────────────────────
 

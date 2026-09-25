@@ -324,3 +324,135 @@ async def test_brief_falls_back_to_raw_digest_without_hermes(config, clock, fake
         _, markdown, by_hermes = app.db.get_brief(clock.now.date())
         assert not by_hermes and "connect Hermes" in markdown and "Fed signals pause" in markdown
         assert "headlines only" in str(app.query_one("#brief-status").render())
+
+
+# ── proposed changes (v3) ──
+
+PROPOSAL_REPLY = """Here's the plan: pull in the job hunt, add a follow-up, and drop the old course.
+
+```terminus-actions
+[{"op": "schedule", "task": TASK_JOB, "day": "today"},
+ {"op": "add", "title": "Email Kim back", "day": "tomorrow", "at": "09:00", "tags": ["job"]},
+ {"op": "delete", "task": TASK_COURSE},
+ {"op": "done", "task": 999}]
+```"""
+
+
+def make_proposal_app(config, clock):
+    from datetime import timedelta
+    from fake_hermes import FakeHermes
+    from fake_todoist import FakeTodoist
+    from terminus.agent_client import HermesClient
+    from terminus.todoist import TodoistSync
+    db = Database(":memory:")
+    today = clock.now.date()
+    job = db.add_task("Find a job", today - timedelta(days=13), estimate=2)
+    course = db.add_task("Finish C++ course", today - timedelta(days=13))
+    reply = PROPOSAL_REPLY.replace("TASK_JOB", str(job)).replace("TASK_COURSE", str(course))
+    hermes = FakeHermes(reply=reply)
+    hermes.tool_events = False
+    todo = FakeTodoist()
+    sync = TodoistSync(db, "secret", clock=clock, transport=todo.transport)
+    app = TerminusApp(config=config, db=db, clock=clock, todoist=sync,
+                      hermes=HermesClient("box", "hermes-key", transport=hermes.transport))
+    return app, hermes, todo, job, course
+
+
+async def ask(app, pilot, text="sort out my job hunt"):
+    await pilot.press("slash", *text, "enter")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+async def test_proposed_changes_apply_on_y(config, clock):
+    from datetime import timedelta
+    from terminus.widgets.proposal_panel import ProposalPanel
+    app, hermes, todo, job, course = make_proposal_app(config, clock)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await ask(app, pilot)
+        # the block is hidden from the chat text but kept in history for Hermes
+        shown = app.query_one(".agent-reply").source
+        assert "terminus-actions" not in shown and "Here's the plan" in shown
+        assert "terminus-actions" in app._chat[-1]["content"]
+        system = hermes.requests[-1]["messages"][0]["content"]
+        assert f"[#{job}] Find a job" in system and "```terminus-actions" in system
+
+        panel = app.query_one(ProposalPanel)
+        assert len(panel.proposal.changes) == 3
+        assert panel.proposal.rejected == ["#4 done: no task [#999]"]
+        assert app.db.get_task(course) is not None  # nothing applied yet
+
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        today = clock.now.date()
+        moved = app.db.get_task(job)
+        assert moved.day == today and not moved.backlogged
+        assert app.plan.block_for(job) is not None  # on the timeline now
+        added = [t for t in app.db.upcoming_tasks(today) if t.title == "Email Kim back"][0]
+        assert added.day == today + timedelta(days=1) and added.fixed_start == time(9)
+        assert app.db.get_task(course) is None
+        assert "applied 3 of 3" in app._chat[-1]["content"]
+        assert "✓ Add “Email Kim back”" in str(app.query_one(".proposal-outcome").render())
+        # Todoist got the same changes
+        assert todo.item_named("Email Kim back")["due"] == {"date": "2026-09-26T09:00:00"}
+        assert todo.item_named("Find a job")["due"] == {"date": "2026-09-25"}
+        assert todo.item_named("Finish C++ course")["is_deleted"]
+        assert app.focused.id == "agent-input"
+
+
+async def test_unticked_changes_are_skipped(config, clock):
+    from terminus.widgets.proposal_panel import ProposalPanel
+    app, _, _, job, course = make_proposal_app(config, clock)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await ask(app, pilot)
+        assert app.query_one(ProposalPanel) is not None
+        await pilot.press("space")  # untick the first (schedule Find a job)
+        await pilot.press("y")
+        await pilot.pause()
+        assert app.db.get_task(job).backlogged  # left alone
+        assert app.db.get_task(course) is None  # the ticked ones went through
+        assert "1 unticked" in str(app.query_one(".proposal-outcome").render())
+
+
+async def test_discard_changes_nothing(config, clock):
+    app, _, todo, job, course = make_proposal_app(config, clock)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await ask(app, pilot)
+        before = [(t.id, t.day, t.overdue_from) for t in app.db.tasks_for_day(clock.now.date())]
+        await pilot.press("n")
+        await pilot.pause()
+        after = [(t.id, t.day, t.overdue_from) for t in app.db.tasks_for_day(clock.now.date())]
+        assert before == after
+        assert "discarded" in app._chat[-1]["content"]
+        assert "Discarded" in str(app.query_one(".proposal-outcome").render())
+
+
+async def test_new_message_supersedes_pending_proposal(config, clock):
+    app, _, _, job, course = make_proposal_app(config, clock)
+    async with app.run_test(size=(120, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await ask(app, pilot)
+        app.query_one("#agent-input").focus()  # click back into the input without deciding
+        await pilot.press(*"actually, never mind", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "Superseded" in str(app.query(".proposal-outcome").first().render())
+        assert app.db.get_task(course) is not None
+
+
+async def test_brief_does_not_offer_changes(config, clock, fake_gather):
+    import dataclasses
+    from datetime import time as dtime
+    from fake_hermes import FakeHermes
+    from terminus.agent_client import HermesClient
+    fake = FakeHermes(reply="## Today\\nFine.")
+    cfg = dataclasses.replace(config, brief_time=dtime(6))
+    app = TerminusApp(config=cfg, db=Database(":memory:"), clock=clock,
+                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        assert "terminus-actions" not in fake.requests[-1]["messages"][0]["content"]

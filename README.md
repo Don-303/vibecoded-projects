@@ -93,8 +93,22 @@ Press `4` or `/` to chat with a [Hermes Agent](https://hermes-agent.nousresearch
 running on another machine. Each message you send includes today's plan (the timeline,
 overdue and undated tasks, and your focus stats), so you can ask "what should I do next?"
 or "plan my afternoon". Replies stream in as Markdown, and a status line shows what the
-agent is doing while it works. The agent can't change your tasks yet; it tells you which
-keys to press.
+agent is doing while it works.
+
+**The agent can propose changes, and you confirm them.** Ask something like "move Learn
+git to tomorrow at 9 and add a task to reply to Kim". Below its reply, a panel lists
+each change (add, mark done, move to a day or time, edit, delete) with all of them
+ticked:
+
+```
+Hermes proposes 2 changes   space toggle · y apply ticked · n discard
+ [X] Move "Learn git" · overdue → tomorrow 09:00
+ [X] Add "Reply to Kim about my resume" · tomorrow 10:00 ~1
+```
+
+Nothing changes until you press `y`. Changes that don't check out (a task that doesn't
+exist, a time that has already passed) are listed as skipped, with the reason. Applied
+changes go through the same code as your own keypresses, so Todoist stays in sync.
 
 **On the Hermes machine**, in `~/.hermes/.env`:
 ```
@@ -153,6 +167,7 @@ found inside an email. Give its email access read-only permissions where you can
 | `F` | anywhere | Start or pause free focus (not tied to any task) |
 | `/` | anywhere | Agent view, cursor in the chat box |
 | `ctrl+l` | Agent | Start a new conversation |
+| `space` / `y` / `n` | proposed changes | Toggle one / apply the ticked ones / discard all |
 | `5` | anywhere | Morning brief |
 | `g` | Brief | Ask Hermes for the brief again |
 | `r` | anywhere | Sync with Todoist now (only when a token is set) |
@@ -212,5 +227,4 @@ headlessly with Textual's Pilot, using an injectable fake clock.
 
 - **v2** (done): the Stats view, and Hermes agent chat with streamed replies and an
   online/offline indicator.
-- **v3**: The agent proposes structured changes (add, reschedule, split), and nothing is
-  applied until you confirm.
+- **v3** (done): the agent proposes task changes, and nothing is applied until you confirm.

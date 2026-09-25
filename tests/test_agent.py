@@ -51,12 +51,18 @@ def test_context_describes_the_day():
         blocks=[Block(run, now, now + timedelta(minutes=50), BlockState.RUNNING, 0.4)],
         overflow=[], overdue=[old, undated],
     )
+    gym = Task(4, "Gym", DAY + timedelta(days=1), 4, fixed_start=time(18))
     ctx = build_context(plan, now=now, focus_today=timedelta(minutes=32), streak=3,
-                        focus_task="Refactor")
-    assert "10:00–10:50 [running] Refactor (~2 pomodoros) #code (40% done)" in ctx
-    assert "Find a job (overdue since Sep 12)" in ctx
-    assert "apply for jobs (no date)" in ctx
+                        focus_task="Refactor", upcoming=[gym])
+    assert "- [#1] 10:00–10:50 [running] Refactor (~2 pomodoros) #code (40% done)" in ctx
+    assert "- [#2] Find a job (overdue since Sep 12, ~1 pomodoro)" in ctx
+    assert "- [#3] apply for jobs (no date, ~1 pomodoro)" in ctx
+    assert "Upcoming (next 7 days):\n- [#4] Sat 26 Sep 18:00 Gym (~1 pomodoro)" in ctx
     assert "Focus logged today: 32m. Streak: 3 days. Focus timer: Refactor." in ctx
+    assert "terminus-actions" not in ctx  # brief / plain context: no change protocol
+    with_actions = build_context(plan, now=now, focus_today=timedelta(), streak=0,
+                                 focus_task=None, actions=True)
+    assert "```terminus-actions" in with_actions and '"task" is the number shown as [#N]' in with_actions
 
 
 async def test_agent_failure_inside_stream_is_raised():

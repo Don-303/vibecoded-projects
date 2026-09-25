@@ -216,6 +216,15 @@ class Database:
         )
         return [_task(r) for r in rows]
 
+    def upcoming_tasks(self, after: date, days: int = 7) -> list[Task]:
+        """Unfinished tasks on the ``days`` days after ``after``, by day and time."""
+        rows = self.conn.execute(
+            "SELECT * FROM tasks WHERE status = 'todo' AND day > ? AND day <= ?"
+            " ORDER BY day, fixed_start IS NULL, fixed_start, position",
+            (after.isoformat(), (after + timedelta(days=days)).isoformat()),
+        )
+        return [_task(r) for r in rows]
+
     def move_task(self, task_id: int, offset: int) -> None:
         """Swap a task with its neighbour ``offset`` places away in its day's order."""
         task = self.get_task(task_id)
