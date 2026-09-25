@@ -8,11 +8,11 @@ def at(h, m=0, day=DAY):
 
 
 def test_migration_is_idempotent(tmp_path):
-    from terminus.db import Database
+    from terminus.db import MIGRATIONS, Database
     path = tmp_path / "x.db"
     Database(path).close()
     db = Database(path)
-    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert db.conn.execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
 
 
 def test_add_and_order(db):
@@ -101,3 +101,11 @@ def test_upgrade_from_v1_keeps_sessions(tmp_path):
     db = Database(path)
     assert db.worked_by_task([1], at(12)) == {1: timedelta(minutes=25)}
     assert db.get_task(1).todoist_id is None
+
+
+def test_carry_over_marks_overdue_since_original_day(db):
+    t = db.add_task("old", DAY - timedelta(days=3))
+    db.carry_over(DAY - timedelta(days=1))
+    db.carry_over(DAY)
+    task = db.get_task(t)
+    assert task.day == DAY and task.overdue_from == DAY - timedelta(days=3)

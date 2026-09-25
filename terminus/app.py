@@ -26,7 +26,7 @@ from terminus.widgets.timeline import fmt_duration
 #: Actions that make no sense while a modal (e.g. the task form) is open.
 MAIN_SCREEN_ACTIONS = {
     "show", "new_task", "toggle_done", "toggle_focus", "agent",
-    "edit_task", "delete_task", "move_task", "quit", "sync",
+    "edit_task", "delete_task", "move_task", "quit", "sync", "do_today",
 }  # fmt: skip
 
 
@@ -329,6 +329,8 @@ class TerminusApp(App):
                     tags=parsed.tags,
                     fixed_start=parsed.fixed_start,
                 )
+                if parsed.fixed_start and task.overdue_from:
+                    self.db.set_overdue(task.id, None)  # pinned to a time today → on the timeline
                 self._pushed(TodoistSync.queue_update, task, self.db.get_task(task.id))
                 self.refresh_all()
 
@@ -352,6 +354,17 @@ class TerminusApp(App):
         else:
             self._pending_delete = (task.id, now)
             self.notify(f"Press d again to delete “{task.title}”.", severity="warning", timeout=4)
+
+    def action_do_today(self) -> None:
+        """Pull an overdue task onto today's timeline (and make it due today in Todoist)."""
+        task = self.selected_task()
+        if task is None or task.overdue_from is None:
+            self.notify("Only overdue tasks need this — others are already on today.")
+            return
+        self.db.set_overdue(task.id, None)
+        self._pushed(TodoistSync.queue_reschedule, task.id)
+        self.notify(f"“{task.title}” is on today's plan.")
+        self.refresh_all()
 
     def action_move_task(self, offset: int) -> None:
         if self.tasks_view.sort != "plan":

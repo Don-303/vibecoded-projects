@@ -167,6 +167,13 @@ class TodoistSync:
                                 "unit": "minute"}
         self._enqueue("item_update", ref, args)
 
+    def queue_reschedule(self, task_id: int) -> None:
+        """Push a task's current day/pin as its due date (e.g. overdue → today)."""
+        task = self.db.get_task(task_id)
+        ref = self._ref(task_id)
+        if task is not None and ref is not None:
+            self._enqueue("item_update", ref, {"due": format_due(task.day, task.fixed_start)})
+
     def queue_done(self, task_id: int, done: bool) -> None:
         ref = self._ref(task_id)
         if ref is not None:
@@ -355,9 +362,10 @@ class TodoistSync:
             day = local.day if local and local.day >= today else today
             fixed = None
         elif due_day < today:
-            day, fixed = today, None  # overdue: do it today, the old time has passed
+            day, fixed = today, None  # overdue: listed on today, the old time has passed
         else:
             day, fixed = due_day, due_time
+        overdue = due_day if due_day is not None and due_day < today else None
 
         estimate = text_estimate or (local.estimate if local else 1)
         duration = item.get("duration")
@@ -368,20 +376,21 @@ class TodoistSync:
 
         if local is None:
             task_id = self.db.add_task(title, day, estimate=estimate, tags=tags,
-                                       fixed_start=fixed, now=self.clock())
+                                       fixed_start=fixed, overdue_from=overdue, now=self.clock())
             with self.db.conn:
                 self.db.conn.execute("UPDATE tasks SET todoist_id = ? WHERE id = ?",
                                      (item["id"], task_id))
             return True
 
-        changed = (local.title, local.tags, local.estimate, local.fixed_start, local.day) != (
-            title, tags, estimate, fixed, day)
+        changed = (local.title, local.tags, local.estimate, local.fixed_start, local.day,
+                   local.overdue_from) != (title, tags, estimate, fixed, day, overdue)
         if local.done:  # reopened on the phone (or a recurring task rolled forward)
             self.db.set_done(local.id, False, self.clock())
             changed = True
         if changed:
             self.db.update_task(local.id, title=title, estimate=estimate, tags=tags, fixed_start=fixed)
             self.db.set_day(local.id, day)
+            self.db.set_overdue(local.id, overdue)
         return changed
 
     def _reconcile_full(self, seen: set[str]) -> int:

@@ -13,6 +13,8 @@ Rules:
   skipping around upcoming fixed blocks. The one being focused on is
   RUNNING; the rest are NEXT. Whatever doesn't fit before day end is
   overflow (it will carry over to tomorrow).
+* Overdue tasks (left over from past days) are listed separately, not
+  placed, until they're pulled onto today — unless being focused on.
 """
 
 from __future__ import annotations
@@ -84,7 +86,9 @@ def plan_day(
 
     # Floating: queue from now.
     cursor = max(_ceil_minute(now), start_of_day)
-    floating = [t for t in tasks if not t.done and not t.fixed]
+    overdue = [t for t in tasks if not t.done and t.overdue_from and t.id != active_id]
+    overdue.sort(key=lambda t: (t.overdue_from, t.position))
+    floating = [t for t in tasks if not t.done and not t.fixed and t not in overdue]
     floating.sort(key=lambda t: (t.id != active_id, t.position))  # focused task first
     overflow: list[Task] = []
 
@@ -112,4 +116,4 @@ def plan_day(
         cursor = start + need
 
     blocks.sort(key=lambda b: (b.start, b.end))
-    return DayPlan(blocks=blocks, overflow=overflow)
+    return DayPlan(blocks=blocks, overflow=overflow, overdue=overdue)

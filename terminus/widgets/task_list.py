@@ -12,7 +12,7 @@ from textual.containers import Vertical
 from textual.widgets import DataTable, Input, Static
 
 from terminus.models import BlockState, DayPlan, Task
-from terminus.theme import AMBER, CYAN, GREEN, MUTED, STATE_COLOR, STATE_ICON
+from terminus.theme import AMBER, CYAN, GREEN, MUTED, RED, STATE_COLOR, STATE_ICON
 
 SORTS = ["plan", "title", "estimate", "tag"]
 
@@ -26,6 +26,7 @@ class TasksView(Vertical):
     BINDINGS = [
         Binding("e", "app.edit_task", "Edit"),
         Binding("d", "app.delete_task", "Delete"),
+        Binding("t", "app.do_today", "Do today"),
         Binding("shift+up,K", "app.move_task(-1)", "Move up", show=False),
         Binding("shift+down,J", "app.move_task(1)", "Move down", show=False),
         Binding("o", "cycle_sort", "Sort"),
@@ -92,8 +93,9 @@ class TasksView(Vertical):
             return lambda t: (t.done, -t.estimate, t.position)
         if self.sort == "tag":
             return lambda t: (t.done, t.tags[0] if t.tags else "~", t.position)
-        # plan: done first (they happened), then timeline order, then overflow.
+        # plan: timeline order, then overflow, then overdue.
         order = {b.task.id: i for i, b in enumerate(self._plan.blocks)}
+        order.update({t.id: 10_000 + i for i, t in enumerate(self._plan.overdue)})
         return lambda t: order.get(t.id, len(order) + t.position)
 
     def _rebuild(self) -> None:
@@ -101,6 +103,7 @@ class TasksView(Vertical):
         keep = self.selected_task_id()
         table.clear()
         overflow = {t.id for t in self._plan.overflow}
+        overdue = {t.id for t in self._plan.overdue}
         for t in self._visible():
             block = self._plan.block_for(t.id)
             if block:
@@ -109,6 +112,9 @@ class TasksView(Vertical):
                 slot = Text(f"{block.start:%H:%M}–{block.end:%H:%M}", style=MUTED)
                 if block.state is BlockState.RUNNING:
                     slot.stylize(CYAN)
+            elif t.id in overdue:
+                color, icon = RED, Text("!", style=RED)
+                slot = Text(f"overdue · {t.overdue_from:%b %d}", style=RED)
             elif t.id in overflow:
                 color, icon, slot = AMBER, Text("»", style=AMBER), Text("tomorrow", style=AMBER)
             else:

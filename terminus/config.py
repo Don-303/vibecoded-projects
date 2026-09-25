@@ -59,12 +59,15 @@ class Config:
     @classmethod
     def from_env(cls, env: os._Environ[str] | dict[str, str] = os.environ) -> Config:
         """Build a config from ``config.toml``, overridden by environment variables."""
-        todoist = _config_file().get("todoist", {})
+        file = _config_file()
+        planner, todoist = file.get("planner", {}), file.get("todoist", {})
         return cls(
             db_path=Path(env.get("TERMINUS_DB", "")) if env.get("TERMINUS_DB") else _default_db_path(),
-            day_start=_parse_hhmm(env.get("TERMINUS_DAY_START", "08:00")),
-            day_end=_parse_hhmm(env.get("TERMINUS_DAY_END", "20:00")),
-            pomodoro=timedelta(minutes=int(env.get("TERMINUS_POMODORO_MIN", "25"))),
+            day_start=_parse_hhmm(env.get("TERMINUS_DAY_START") or planner.get("day_start", "08:00")),
+            day_end=_parse_hhmm(env.get("TERMINUS_DAY_END") or planner.get("day_end", "20:00")),
+            pomodoro=timedelta(
+                minutes=int(env.get("TERMINUS_POMODORO_MIN") or planner.get("pomodoro_minutes", 25))
+            ),
             todoist_token=_todoist_token(env),
             todoist_project=env.get("TODOIST_PROJECT") or todoist.get("project", "Terminus"),
             todoist_interval=max(

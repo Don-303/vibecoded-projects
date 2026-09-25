@@ -181,3 +181,18 @@ async def test_sync_key_hidden_without_todoist(config, clock):
     app = make_app(config, clock)
     async with app.run_test():
         assert app.check_action("sync", ()) is False
+
+
+async def test_overdue_section_and_do_today(config, clock):
+    from datetime import timedelta
+    app = make_app(config, clock)
+    tid = app.db.add_task("Stale", clock.now.date() - timedelta(days=2))
+    app.db.add_task("Fresh", clock.now.date())
+    async with app.run_test() as pilot:  # startup carry-over marks it overdue
+        assert [t.title for t in app.plan.overdue] == ["Stale"]
+        timeline = str(app.query_one("#timeline").render())
+        assert "Overdue" in timeline and "since Sep 23" in timeline
+        await pilot.press("2")
+        await pilot.press("down", "t")  # plan order: Fresh, then overdue Stale
+        assert app.plan.overdue == []
+        assert app.plan.block_for(tid) is not None

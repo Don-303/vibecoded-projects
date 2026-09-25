@@ -250,3 +250,18 @@ async def test_inbox_matched_by_flag(db, fake, clock):
     sync = TodoistSync(db, "secret", project_name="Inbox", clock=clock, transport=fake.transport)
     await sync.sync()
     assert sync._get("project_id") == pid
+
+
+async def test_overdue_marked_and_rescheduled(db, fake, sync):
+    await sync.sync()
+    iid = fake.phone_add("Old", due={"date": "2026-09-12"})
+    fake.phone_add("No date")
+    await sync.sync()
+    tasks = {t.title: t for t in db.tasks_for_day(DAY)}
+    assert tasks["Old"].overdue_from == datetime(2026, 9, 12).date()
+    assert tasks["No date"].overdue_from is None
+    db.set_overdue(tasks["Old"].id, None)
+    sync.queue_reschedule(tasks["Old"].id)
+    await sync.sync()
+    assert fake.items[iid]["due"] == {"date": "2026-09-25"}
+    assert db.get_task(tasks["Old"].id).overdue_from is None

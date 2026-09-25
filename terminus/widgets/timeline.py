@@ -10,7 +10,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from terminus.models import Block, BlockState, DayPlan
-from terminus.theme import AMBER, CYAN, FAINT, MUTED, STATE_COLOR, STATE_ICON
+from terminus.theme import AMBER, CYAN, FAINT, MUTED, RED, STATE_COLOR, STATE_ICON
 
 #: Each block gets one row per this much time, so longer blocks look longer.
 ROW = timedelta(minutes=15)
@@ -93,6 +93,17 @@ def render_timeline(plan: DayPlan, now: datetime, start: datetime, end: datetime
         for t in plan.overflow:
             text.append(f"   · {t.title}", style=AMBER)
             text.append(f"  ~{t.estimate}\n", style=MUTED)
+
+    if plan.overdue:
+        text.append("\nOverdue", style=f"bold {RED}")
+        text.append("   select in Tasks [2] · t do today · space done\n", style=MUTED)
+        width = max(len(t.title) for t in plan.overdue)
+        for t in plan.overdue:
+            text.append(f"   · {t.title:<{width}}", style=RED)
+            text.append(f"   since {t.overdue_from:%b %d}", style=MUTED)
+            for tag in t.tags:
+                text.append(f"  #{tag}", style=MUTED)
+            text.append("\n")
     return text, now_line
 
 
@@ -112,7 +123,9 @@ def summary(plan: DayPlan, free_focus: timedelta | None = None) -> Text:
     for state, label in labels:
         text.append(f"{STATE_ICON[state]} {counts[state]} {label}   ", style=STATE_COLOR[state])
     if plan.overflow:
-        text.append(f"» {len(plan.overflow)} overflow", style=AMBER)
+        text.append(f"» {len(plan.overflow)} overflow   ", style=AMBER)
+    if plan.overdue:
+        text.append(f"! {len(plan.overdue)} overdue", style=RED)
     return text
 
 

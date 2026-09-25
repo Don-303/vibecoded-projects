@@ -66,6 +66,13 @@ MIGRATIONS = [
         args    TEXT NOT NULL
     );
     """,
+    # v3: overdue tasks sit in their own list instead of on the timeline.
+    #     Dropping the sync token makes the next Todoist sync a full one,
+    #     which back-fills overdue_from from Todoist's due dates.
+    """
+    ALTER TABLE tasks ADD COLUMN overdue_from TEXT;
+    DELETE FROM sync_state WHERE key = 'sync_token';
+    """,
 ]
 
 
@@ -81,6 +88,7 @@ def _task(row: sqlite3.Row) -> Task:
         fixed_start=time.fromisoformat(row["fixed_start"]) if row["fixed_start"] else None,
         done_at=datetime.fromisoformat(row["done_at"]) if row["done_at"] else None,
         todoist_id=row["todoist_id"],
+        overdue_from=date.fromisoformat(row["overdue_from"]) if row["overdue_from"] else None,
     )
 
 
@@ -122,6 +130,7 @@ class Database:
         estimate: int = 1,
         tags: list[str] | None = None,
         fixed_start: time | None = None,
+        overdue_from: date | None = None,
         now: datetime | None = None,
     ) -> int:
         now = now or datetime.now()
@@ -130,8 +139,9 @@ class Database:
                 "SELECT COALESCE(MAX(position), 0) + 1 FROM tasks WHERE day = ?", (day.isoformat(),)
             ).fetchone()
             cur = self.conn.execute(
-                "INSERT INTO tasks (title, tags, estimate, day, position, fixed_start, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tasks"
+                " (title, tags, estimate, day, position, fixed_start, created_at, overdue_from)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     title,
                     ",".join(tags or []),
@@ -140,6 +150,7 @@ class Database:
                     pos,
                     fixed_start.isoformat("minutes") if fixed_start else None,
                     now.isoformat(timespec="seconds"),
+                    overdue_from.isoformat() if overdue_from else None,
                 ),
             )
         return cur.lastrowid
@@ -214,12 +225,20 @@ class Database:
                 (day.isoformat(), pos, task_id, day.isoformat()),
             )
 
+    def set_overdue(self, task_id: int, since: date | None) -> None:
+        """Mark a task overdue (since its original day), or None to put it back on the plan."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tasks SET overdue_from = ? WHERE id = ?",
+                (since.isoformat() if since else None, task_id),
+            )
+
     def task_by_todoist_id(self, todoist_id: str) -> Task | None:
         row = self.conn.execute("SELECT * FROM tasks WHERE todoist_id = ?", (todoist_id,)).fetchone()
         return _task(row) if row else None
 
     def carry_over(self, today: date) -> int:
-        """Move unfinished floating tasks from past days onto ``today``.
+        """Move unfinished floating tasks from past days onto ``today``, marked overdue.
 
         Fixed (pinned) tasks stay on their day — a missed meeting doesn't roll over.
         """
@@ -234,7 +253,8 @@ class Database:
             ).fetchall()
             for offset, (task_id,) in enumerate(stale, start=1):
                 self.conn.execute(
-                    "UPDATE tasks SET day = ?, position = ? WHERE id = ?",
+                    "UPDATE tasks SET overdue_from = COALESCE(overdue_from, day),"
+                    " day = ?, position = ? WHERE id = ?",
                     (today.isoformat(), base + offset, task_id),
                 )
         return len(stale)

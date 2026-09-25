@@ -30,8 +30,11 @@ Requires Python 3.11+.
     window and as *missed* once it has passed.
   - **Floating** tasks queue from now, in list order, and move around pinned blocks.
     If you finish early or late, everything after shifts to match.
-  - Floating tasks that don't fit before the day ends show as **overflow**. Unfinished
-    floating tasks carry over to the next day automatically.
+  - Floating tasks that don't fit before the day ends show as **overflow**.
+  - Unfinished tasks from past days (including overdue Todoist tasks) go in an **Overdue**
+    list at the bottom of Today instead of on the timeline. Select one in Tasks and press
+    `t` to put it on today's plan, which also makes it due today in Todoist. Pinning it
+    to a time does the same.
 - **Focus sessions** (`f`) log real time against a task. Time already spent reduces the
   task's remaining block. A notification fires at the end of every pomodoro.
   Free focus (`F`, or `f` with no tasks) logs time without a task, and still counts toward
@@ -94,6 +97,7 @@ tasks to the next day (Todoist already shows those as overdue).
 | `s` | Tasks | Search (text, or `#tag`) |
 | `o` | Tasks | Cycle sort: plan → title → estimate → tag |
 | `e` / `d d` | Tasks | Edit / delete (press `d` twice) |
+| `t` | Tasks | Move an overdue task onto today's plan |
 | `J` `K` / `shift+↑↓` | Tasks | Reorder (plan sort only) |
 | `esc` | inputs | Back to the table |
 | `ctrl+p` | anywhere | Command palette |
@@ -103,8 +107,18 @@ estimate in pomodoros, and `@HH:MM` pins the task to a start time (`@9` and `@93
 
 ## Configuration
 
-Settings come from `~/.config/terminus/config.toml` (the `[todoist]` table), and the
-environment variables below override it.
+Settings come from `~/.config/terminus/config.toml`, and the environment variables below
+override it:
+
+```toml
+[planner]
+day_start = "04:00"
+day_end = "22:00"
+# pomodoro_minutes = 25
+
+[todoist]
+project = "Inbox"
+```
 
 | Variable | Default | |
 |---|---|---|

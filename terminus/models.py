@@ -21,6 +21,7 @@ class Task:
     fixed_start: time | None = None  # set => pinned block (meeting); else floating
     done_at: datetime | None = None
     todoist_id: str | None = None
+    overdue_from: date | None = None  # set => in the Overdue list, not on the timeline
 
     @property
     def done(self) -> bool:
@@ -70,6 +71,7 @@ class Block:
 class DayPlan:
     blocks: list[Block]  # sorted by start
     overflow: list[Task]  # floating tasks that don't fit before day end
+    overdue: list[Task] = field(default_factory=list)  # left over from past days
 
     def block_for(self, task_id: int) -> Block | None:
         return next((b for b in self.blocks if b.task.id == task_id), None)

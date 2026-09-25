@@ -83,3 +83,20 @@ def test_overflow_past_day_end():
 def test_done_block_uses_worked_time():
     p = plan([task(1, estimate=2, done_at=at(9, 30))], at(10), worked={1: timedelta(minutes=30)})
     assert spans(p)[1] == ("09:00", "09:30", "done")
+
+
+def test_overdue_tasks_are_listed_not_placed():
+    old = task(1)
+    old.overdue_from = DAY - timedelta(days=13)
+    p = plan([old, task(2)], at(10))
+    assert [t.id for t in p.overdue] == [1]
+    assert p.block_for(1) is None
+    assert spans(p)[2][0] == "10:00"  # today's work isn't pushed back by it
+
+
+def test_focusing_on_an_overdue_task_puts_it_on_the_timeline():
+    old = task(1)
+    old.overdue_from = DAY - timedelta(days=1)
+    active = Session(id=1, task_id=1, start=at(10))
+    p = plan([old], at(10, 5), active=active)
+    assert p.overdue == [] and p.running.task.id == 1
