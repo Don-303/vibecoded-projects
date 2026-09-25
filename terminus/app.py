@@ -329,7 +329,7 @@ class TerminusApp(App):
                     tags=parsed.tags,
                     fixed_start=parsed.fixed_start,
                 )
-                if parsed.fixed_start and task.overdue_from:
+                if parsed.fixed_start and task.backlogged:
                     self.db.set_overdue(task.id, None)  # pinned to a time today → on the timeline
                 self._pushed(TodoistSync.queue_update, task, self.db.get_task(task.id))
                 self.refresh_all()
@@ -356,9 +356,9 @@ class TerminusApp(App):
             self.notify(f"Press d again to delete “{task.title}”.", severity="warning", timeout=4)
 
     def action_do_today(self) -> None:
-        """Pull an overdue task onto today's timeline (and make it due today in Todoist)."""
+        """Pull an overdue/undated task onto today's timeline (due today in Todoist too)."""
         task = self.selected_task()
-        if task is None or task.overdue_from is None:
+        if task is None or not task.backlogged:
             self.notify("Only overdue tasks need this — others are already on today.")
             return
         self.db.set_overdue(task.id, None)

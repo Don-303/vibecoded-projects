@@ -265,3 +265,20 @@ async def test_overdue_marked_and_rescheduled(db, fake, sync):
     await sync.sync()
     assert fake.items[iid]["due"] == {"date": "2026-09-25"}
     assert db.get_task(tasks["Old"].id).overdue_from is None
+
+
+async def test_undated_tasks_join_overdue_list_until_scheduled(db, fake, sync):
+    from terminus.models import Task  # noqa: F401
+    await sync.sync()
+    iid = fake.phone_add("Someday")
+    await sync.sync()
+    t = only_task(db)
+    assert t.no_due and t.backlogged
+    db.set_overdue(t.id, None)  # what `t` (do today) does
+    sync.queue_reschedule(t.id)
+    await sync.sync()
+    assert fake.items[iid]["due"] == {"date": "2026-09-25"}
+    assert not db.get_task(t.id).backlogged
+    fake.phone_edit(iid, due=None)  # date removed on the phone → back in the list
+    await sync.sync()
+    assert db.get_task(t.id).no_due

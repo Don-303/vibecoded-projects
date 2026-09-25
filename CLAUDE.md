@@ -29,7 +29,8 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
   after every mutation. **Any new mutation in the app must do the same.** Tests use
   `tests/fake_todoist.py` (httpx MockTransport) and never reach the network.
 - Overdue: `tasks.overdue_from` is set by `carry_over` and by Todoist items whose due
-  date has passed. `plan_day` lists these in `DayPlan.overdue` rather than placing them;
+  date has passed. `tasks.no_due` is set for undated Todoist items. `Task.backlogged`
+  covers both. `plan_day` lists these in `DayPlan.overdue` rather than placing them;
   `action_do_today` clears the flag and pushes due=today.
 - Config: `~/.config/terminus/config.toml` (`[planner]`, `[todoist]`); env vars override.
 - Sessions: `task_id` NULL means free focus. `ON DELETE SET NULL` keeps logged time when a

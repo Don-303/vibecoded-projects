@@ -31,8 +31,8 @@ Requires Python 3.11+.
   - **Floating** tasks queue from now, in list order, and move around pinned blocks.
     If you finish early or late, everything after shifts to match.
   - Floating tasks that don't fit before the day ends show as **overflow**.
-  - Unfinished tasks from past days (including overdue Todoist tasks) go in an **Overdue**
-    list at the bottom of Today instead of on the timeline. Select one in Tasks and press
+  - Unfinished tasks from past days (including overdue Todoist tasks) and Todoist tasks
+    with no date go in an **Overdue** list at the bottom of Today instead of on the timeline. Select one in Tasks and press
     `t` to put it on today's plan, which also makes it due today in Todoist. Pinning it
     to a time does the same.
 - **Focus sessions** (`f`) log real time against a task. Time already spent reduces the
@@ -65,7 +65,7 @@ When you switch projects, the next sync pulls the new project in full.
 
 | On your phone (in the Terminus project) | In Terminus |
 |---|---|
-| Add a task with no date | Shows on today |
+| Add a task with no date | Goes in the Overdue list on today, marked "no date" |
 | Give it a date / a time | Goes on that day / is pinned at that time |
 | Overdue task | Shows on today (the old time is dropped) |
 | Labels | Tags |

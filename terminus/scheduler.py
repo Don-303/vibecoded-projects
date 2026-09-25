@@ -13,7 +13,8 @@ Rules:
   skipping around upcoming fixed blocks. The one being focused on is
   RUNNING; the rest are NEXT. Whatever doesn't fit before day end is
   overflow (it will carry over to tomorrow).
-* Overdue tasks (left over from past days) are listed separately, not
+* Overdue tasks (left over from past days) and undated Todoist tasks are
+  listed separately (``DayPlan.overdue``), not
   placed, until they're pulled onto today — unless being focused on.
 """
 
@@ -86,8 +87,9 @@ def plan_day(
 
     # Floating: queue from now.
     cursor = max(_ceil_minute(now), start_of_day)
-    overdue = [t for t in tasks if not t.done and t.overdue_from and t.id != active_id]
-    overdue.sort(key=lambda t: (t.overdue_from, t.position))
+    overdue = [t for t in tasks if not t.done and t.backlogged and t.id != active_id]
+    # Oldest overdue first, then undated.
+    overdue.sort(key=lambda t: (t.no_due, t.overdue_from or date.max, t.position))
     floating = [t for t in tasks if not t.done and not t.fixed and t not in overdue]
     floating.sort(key=lambda t: (t.id != active_id, t.position))  # focused task first
     overflow: list[Task] = []

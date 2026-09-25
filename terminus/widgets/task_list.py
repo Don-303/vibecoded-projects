@@ -114,7 +114,8 @@ class TasksView(Vertical):
                     slot.stylize(CYAN)
             elif t.id in overdue:
                 color, icon = RED, Text("!", style=RED)
-                slot = Text(f"overdue · {t.overdue_from:%b %d}", style=RED)
+                label = "no date" if t.no_due else f"overdue · {t.overdue_from:%b %d}"
+                slot = Text(label, style=RED)
             elif t.id in overflow:
                 color, icon, slot = AMBER, Text("»", style=AMBER), Text("tomorrow", style=AMBER)
             else:

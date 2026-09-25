@@ -73,6 +73,11 @@ MIGRATIONS = [
     ALTER TABLE tasks ADD COLUMN overdue_from TEXT;
     DELETE FROM sync_state WHERE key = 'sync_token';
     """,
+    # v4: undated Todoist tasks join the Overdue list too (full resync back-fills it).
+    """
+    ALTER TABLE tasks ADD COLUMN no_due INTEGER NOT NULL DEFAULT 0;
+    DELETE FROM sync_state WHERE key = 'sync_token';
+    """,
 ]
 
 
@@ -89,6 +94,7 @@ def _task(row: sqlite3.Row) -> Task:
         done_at=datetime.fromisoformat(row["done_at"]) if row["done_at"] else None,
         todoist_id=row["todoist_id"],
         overdue_from=date.fromisoformat(row["overdue_from"]) if row["overdue_from"] else None,
+        no_due=bool(row["no_due"]),
     )
 
 
@@ -131,6 +137,7 @@ class Database:
         tags: list[str] | None = None,
         fixed_start: time | None = None,
         overdue_from: date | None = None,
+        no_due: bool = False,
         now: datetime | None = None,
     ) -> int:
         now = now or datetime.now()
@@ -140,8 +147,8 @@ class Database:
             ).fetchone()
             cur = self.conn.execute(
                 "INSERT INTO tasks"
-                " (title, tags, estimate, day, position, fixed_start, created_at, overdue_from)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " (title, tags, estimate, day, position, fixed_start, created_at, overdue_from,"
+                "  no_due) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     title,
                     ",".join(tags or []),
@@ -151,6 +158,7 @@ class Database:
                     fixed_start.isoformat("minutes") if fixed_start else None,
                     now.isoformat(timespec="seconds"),
                     overdue_from.isoformat() if overdue_from else None,
+                    int(no_due),
                 ),
             )
         return cur.lastrowid
@@ -225,12 +233,15 @@ class Database:
                 (day.isoformat(), pos, task_id, day.isoformat()),
             )
 
-    def set_overdue(self, task_id: int, since: date | None) -> None:
-        """Mark a task overdue (since its original day), or None to put it back on the plan."""
+    def set_overdue(self, task_id: int, since: date | None, no_due: bool = False) -> None:
+        """Put a task in the Overdue list (overdue since a day, or undated).
+
+        ``set_overdue(id, None)`` takes it out, back onto the plan.
+        """
         with self.conn:
             self.conn.execute(
-                "UPDATE tasks SET overdue_from = ? WHERE id = ?",
-                (since.isoformat() if since else None, task_id),
+                "UPDATE tasks SET overdue_from = ?, no_due = ? WHERE id = ?",
+                (since.isoformat() if since else None, int(no_due), task_id),
             )
 
     def task_by_todoist_id(self, todoist_id: str) -> Task | None:

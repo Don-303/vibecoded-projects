@@ -100,7 +100,8 @@ def render_timeline(plan: DayPlan, now: datetime, start: datetime, end: datetime
         width = max(len(t.title) for t in plan.overdue)
         for t in plan.overdue:
             text.append(f"   · {t.title:<{width}}", style=RED)
-            text.append(f"   since {t.overdue_from:%b %d}", style=MUTED)
+            since = "no date" if t.no_due else f"since {t.overdue_from:%b %d}"
+            text.append(f"   {since}", style=MUTED)
             for tag in t.tags:
                 text.append(f"  #{tag}", style=MUTED)
             text.append("\n")

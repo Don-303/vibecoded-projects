@@ -100,3 +100,12 @@ def test_focusing_on_an_overdue_task_puts_it_on_the_timeline():
     active = Session(id=1, task_id=1, start=at(10))
     p = plan([old], at(10, 5), active=active)
     assert p.overdue == [] and p.running.task.id == 1
+
+
+def test_undated_listed_after_overdue():
+    undated, old = task(1), task(2)
+    undated.no_due = True
+    old.overdue_from = DAY - timedelta(days=3)
+    p = plan([undated, old, task(3)], at(10))
+    assert [t.id for t in p.overdue] == [2, 1]
+    assert spans(p)[3][0] == "10:00"
