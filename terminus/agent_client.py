@@ -210,8 +210,11 @@ def build_context(
         f"Focus logged today: {fmt_duration(focus_today)}. Streak: {streak} days. "
         f"Focus timer: {focus_task or 'off'}.",
         "",
+        "Every task listed above already exists in the planner — never tell the user to add "
+        "one of them again; for an overdue one, tell them to select it in Tasks [2] and press t. "
         "You can't change the planner directly yet. If the user wants changes, say exactly "
-        "what to do in Terminus: n = new task (quick-add syntax `Title #tag ~2 @14:30`), "
-        "space = mark done, t = move an overdue task onto today, f = focus, e = edit.",
+        "what to do in Terminus: n = new task (quick-add syntax `Title #tag ~2 @14:30`, where "
+        "~2 means two 25-minute pomodoros, not minutes), space = mark done, t = move an "
+        "overdue task onto today, f = start focus, e = edit.",
     ]
     return "\n".join(lines)

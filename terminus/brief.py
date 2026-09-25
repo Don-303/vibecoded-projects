@@ -169,7 +169,9 @@ mention overdue tasks worth pulling in).
 ## Markets & finance
 5–8 one-line bullets of the most important finance/markets news, most significant first, \
 grouped where related, source in parentheses. Start from the headlines provided; search for \
-more if something important is missing. No investment advice.
+more if something important is missing. Copy every number (amounts, percentages, dates) exactly \
+as a source states it — never estimate or round — and if two sources disagree, give both. \
+No investment advice.
 
 Reply with the brief only — no preamble."""
 
