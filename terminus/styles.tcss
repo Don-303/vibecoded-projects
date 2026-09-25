@@ -1,0 +1,166 @@
+/* Terminus — calm dark theme. Colours come from the "terminus" Textual theme
+   (terminus/theme.py): $primary = cyan accent, $success = soft green. */
+
+Screen {
+    background: $background;
+}
+
+#main {
+    height: 1fr;
+}
+
+/* ── sidebar ─────────────────────────────────────────────── */
+
+#sidebar {
+    width: 28;
+    background: $surface;
+    border-right: tall $faint;
+    padding: 1 1;
+}
+
+#brand {
+    color: $primary;
+    text-style: bold;
+    padding: 0 1 1 1;
+}
+
+#nav {
+    height: auto;
+    background: $surface;
+    border: none;
+    padding: 0;
+    margin-bottom: 1;
+}
+
+#nav:focus {
+    border: none;
+}
+
+#nav > .option-list--option-highlighted {
+    background: $panel;
+    color: $primary;
+    text-style: bold;
+}
+
+#status {
+    border-top: solid $faint;
+    padding: 1 1 0 1;
+}
+
+/* ── content ─────────────────────────────────────────────── */
+
+#content {
+    padding: 1 2;
+}
+
+.view-title {
+    text-style: bold;
+    color: $foreground;
+    margin-bottom: 1;
+}
+
+#today-summary {
+    margin-bottom: 1;
+}
+
+#timeline-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $faint;
+    scrollbar-background: $background;
+}
+
+#timeline-scroll:focus {
+    background-tint: $foreground 0%;
+}
+
+.placeholder {
+    color: $muted;
+}
+
+/* ── tasks ───────────────────────────────────────────────── */
+
+Input {
+    background: $surface;
+    border: tall $faint;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+#task-filter {
+    margin-bottom: 1;
+}
+
+#task-table {
+    height: 1fr;
+    background: $background;
+    scrollbar-size-vertical: 1;
+}
+
+#task-table > .datatable--header {
+    background: $background;
+    color: $muted;
+    text-style: bold;
+}
+
+#task-table > .datatable--cursor {
+    background: $panel;
+}
+
+#task-table:focus > .datatable--cursor {
+    background: $primary 20%;
+}
+
+#quick-add {
+    margin-top: 1;
+}
+
+/* ── modal ───────────────────────────────────────────────── */
+
+TaskModal {
+    align: center middle;
+    background: $background 60%;
+}
+
+#task-modal {
+    width: 64;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#task-modal Label {
+    color: $muted;
+    margin-top: 1;
+}
+
+#m-row {
+    height: auto;
+}
+
+#m-row > Vertical {
+    height: auto;
+    width: 1fr;
+}
+
+#m-error {
+    color: $error;
+    height: auto;
+}
+
+#m-buttons {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+#m-buttons Button {
+    margin-left: 1;
+}
+
+Footer {
+    background: $surface;
+}

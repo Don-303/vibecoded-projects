@@ -1,0 +1,39 @@
+"""Runtime configuration, read from environment variables.
+
+Every setting has a sensible default so Terminus runs with zero setup.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from datetime import time, timedelta
+from pathlib import Path
+
+
+def _default_db_path() -> Path:
+    data_home = os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(data_home) / "terminus" / "terminus.db"
+
+
+def _parse_hhmm(value: str) -> time:
+    hours, _, minutes = value.partition(":")
+    return time(int(hours), int(minutes or 0))
+
+
+@dataclass(frozen=True)
+class Config:
+    db_path: Path
+    day_start: time = time(8, 0)
+    day_end: time = time(20, 0)
+    pomodoro: timedelta = timedelta(minutes=25)
+
+    @classmethod
+    def from_env(cls, env: os._Environ[str] | dict[str, str] = os.environ) -> Config:
+        """Build a config from ``TERMINUS_*`` environment variables."""
+        return cls(
+            db_path=Path(env.get("TERMINUS_DB", "")) if env.get("TERMINUS_DB") else _default_db_path(),
+            day_start=_parse_hhmm(env.get("TERMINUS_DAY_START", "08:00")),
+            day_end=_parse_hhmm(env.get("TERMINUS_DAY_END", "20:00")),
+            pomodoro=timedelta(minutes=int(env.get("TERMINUS_POMODORO_MIN", "25"))),
+        )
