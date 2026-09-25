@@ -81,6 +81,41 @@ next successful sync. When a task was changed in both places, the Terminus edit 
 Not synced: task order within the day, focus sessions, and the move of unfinished
 tasks to the next day (Todoist already shows those as overdue).
 
+## Stats
+
+Press `3` to see the last 7 days: focus time per day (with the change from the previous
+week), tasks completed per day, your current and longest streak, and focus time per tag.
+Free focus has its own bar.
+
+## AI agent (Hermes on another machine)
+
+Press `4` or `/` to chat with a [Hermes Agent](https://hermes-agent.nousresearch.com/)
+running on another machine. Each message you send includes today's plan (the timeline,
+overdue and undated tasks, and your focus stats), so you can ask "what should I do next?"
+or "plan my afternoon". Replies stream in as Markdown, and a status line shows what the
+agent is doing while it works. The agent can't change your tasks yet; it tells you which
+keys to press.
+
+**On the Hermes machine**, in `~/.hermes/.env`:
+```
+API_SERVER_ENABLED=true
+API_SERVER_HOST=0.0.0.0          # listen beyond localhost
+API_SERVER_KEY=<long random secret>
+```
+Then run `hermes gateway`. It listens on port 8642.
+
+**Here**, in `~/.config/terminus/config.toml`:
+```toml
+[hermes]
+host = "100.64.0.10"   # Tailscale IP or hostname; port 8642 is assumed
+api_key = "<the same secret>"
+# model = "hermes-agent" # or your Hermes profile name
+```
+Connect over Tailscale, which encrypts traffic between your devices. Hermes can run
+terminal commands on its machine, so don't expose port 8642 to the open internet. The
+sidebar shows `hermes ● online` or `● offline`, based on a check of `/health` every
+minute.
+
 ## Keys
 
 | Key | Where | Action |
@@ -90,7 +125,8 @@ tasks to the next day (Todoist already shows those as overdue).
 | `space` | anywhere | Toggle done: the selected task in Tasks, the running or up-next task in Today |
 | `f` | anywhere | Start or pause focus on the selected or next task. With no tasks, starts free focus |
 | `F` | anywhere | Start or pause free focus (not tied to any task) |
-| `/` | anywhere | Agent view |
+| `/` | anywhere | Agent view, cursor in the chat box |
+| `ctrl+l` | Agent | Start a new conversation |
 | `r` | anywhere | Sync with Todoist now (only when a token is set) |
 | `q` | anywhere | Quit |
 | `a` | Tasks | Quick-add bar |
@@ -129,6 +165,9 @@ project = "Inbox"
 | `TODOIST_API_TOKEN` | contents of `~/.config/terminus/todoist-token` | Turns on Todoist sync |
 | `TODOIST_PROJECT` | `Terminus` | Project to sync (`Inbox` works too) |
 | `TODOIST_SYNC_SECONDS` | `60` | Seconds between background syncs (minimum 15) |
+| `HERMES_HOST` | `127.0.0.1` | Hermes machine (IP, hostname or URL; port 8642 assumed) |
+| `HERMES_API_KEY` | none | Hermes `API_SERVER_KEY`; without it the chat shows setup help |
+| `HERMES_MODEL` | `hermes-agent` | Model name sent to Hermes (your Hermes profile name) |
 
 ## Tests
 
@@ -143,8 +182,7 @@ headlessly with Textual's Pilot, using an injectable fake clock.
 
 ## Roadmap
 
-- **v2**: Stats view (weekly deep-work hours, streak history). Hermes agent chat over an
-  OpenAI-compatible API (`HERMES_HOST`, `HERMES_API_KEY`), with streamed replies and an
+- **v2** (done): the Stats view, and Hermes agent chat with streamed replies and an
   online/offline indicator.
 - **v3**: The agent proposes structured changes (add, reschedule, split), and nothing is
   applied until you confirm.

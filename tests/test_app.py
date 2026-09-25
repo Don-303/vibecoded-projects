@@ -92,8 +92,9 @@ async def test_reorder(config, clock):
 async def test_nav_keys(config, clock):
     app = make_app(config, clock)
     async with app.run_test() as pilot:
-        for key, view in [("3", "stats"), ("slash", "agent"), ("1", "today")]:
-            await pilot.press(key)
+        for key, view in [("3", "stats"), ("slash", "agent"), ("1", "agent"),
+                          ("escape", "agent"), ("1", "today")]:
+            await pilot.press(key)  # "/" focuses the prompt, so "1" is typed until esc
             assert app.current_view == view
 
 
@@ -196,3 +197,75 @@ async def test_overdue_section_and_do_today(config, clock):
         await pilot.press("down", "t")  # plan order: Fresh, then overdue Stale
         assert app.plan.overdue == []
         assert app.plan.block_for(tid) is not None
+
+
+# ── stats & agent ──
+
+async def test_stats_view_shows_focus(config, clock):
+    app = make_app(config, clock)
+    tid = app.db.add_task("Code", clock.now.date(), tags=["code"])
+    app.db.start_session(tid, clock.now.replace(hour=9))
+    app.db.stop_session(clock.now.replace(hour=9, minute=45))
+    async with app.run_test() as pilot:
+        await pilot.press("3")
+        body = str(app.query_one("#stats-body").render())
+        assert "45m" in body and "#code" in body
+
+
+def make_agent_app(config, clock, fake):
+    from terminus.agent_client import HermesClient
+    client = HermesClient("box", "hermes-key", transport=fake.transport)
+    return TerminusApp(config=config, db=Database(":memory:"), clock=clock, hermes=client)
+
+
+async def test_agent_chat_streams_reply_with_plan_context(config, clock):
+    from fake_hermes import FakeHermes
+    fake = FakeHermes(reply="Do **Write** first.")
+    app = make_agent_app(config, clock, fake)
+    app.db.add_task("Write", clock.now.date())
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        assert app._hermes_online is True
+        await pilot.press("slash", *"what next?", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        system, user = fake.requests[0]["messages"]
+        assert system["role"] == "system" and "Write" in system["content"]
+        assert user == {"role": "user", "content": "what next?"}
+        assert app._chat[-1]["content"].strip() == "Do **Write** first."
+        # second turn carries the history
+        await pilot.press(*"thanks", "enter")
+        await app.workers.wait_for_complete()
+        assert [m["role"] for m in fake.requests[1]["messages"]] == ["system", "user", "assistant", "user"]
+        await pilot.press("ctrl+l")
+        assert app._chat == []
+
+
+async def test_agent_offline_shows_error_and_keeps_working(config, clock):
+    from fake_hermes import FakeHermes
+    fake = FakeHermes()
+    fake.online = False
+    app = make_agent_app(config, clock, fake)
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        assert app._hermes_online is False
+        await pilot.press("slash", *"hello", "enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        errors = app.query(".agent-error")
+        assert len(errors) == 1 and "Can't reach Hermes" in str(errors.first().render())
+        assert app._chat == [] and not app._agent_busy
+        fake.online = True
+        await pilot.press(*"again", "enter")
+        await app.workers.wait_for_complete()
+        assert app._hermes_online is True and len(app._chat) == 2
+
+
+async def test_agent_unconfigured_shows_setup(config, clock):
+    app = make_app(config, clock)  # config fixture has no hermes key
+    async with app.run_test() as pilot:
+        await pilot.press("4")
+        assert app.query(".agent-note")
+        await pilot.press(*"hi", "enter")
+        await app.workers.wait_for_complete()
+        assert "No Hermes API key" in str(app.query(".agent-error").first().render())

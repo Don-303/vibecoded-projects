@@ -164,3 +164,50 @@ TaskModal {
 Footer {
     background: $surface;
 }
+
+/* ── stats & agent ───────────────────────────────────────── */
+
+#stats-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+}
+
+#agent-status {
+    margin-bottom: 1;
+}
+
+#agent-log {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $faint;
+    scrollbar-background: $background;
+}
+
+.agent-user {
+    margin: 1 0 0 0;
+}
+
+.agent-activity {
+    height: auto;
+    color: $muted;
+}
+
+.agent-reply {
+    margin: 0 0 0 5;
+    padding: 0;
+    background: $background;
+}
+
+.agent-error {
+    margin: 0 0 0 5;
+}
+
+.agent-note {
+    background: $surface;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#agent-input {
+    margin-top: 1;
+}

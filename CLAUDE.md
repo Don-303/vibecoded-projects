@@ -32,7 +32,14 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
   date has passed. `tasks.no_due` is set for undated Todoist items. `Task.backlogged`
   covers both. `plan_day` lists these in `DayPlan.overdue` rather than placing them;
   `action_do_today` clears the flag and pushes due=today.
-- Config: `~/.config/terminus/config.toml` (`[planner]`, `[todoist]`); env vars override.
+- Config: `~/.config/terminus/config.toml` (`[planner]`, `[todoist]`, `[hermes]`); env vars
+  override it.
+- `terminus/agent_client.py`: `HermesClient` for the OpenAI-compatible Hermes gateway (SSE
+  streaming; named events become "tool" events; `/health` needs no auth). History is kept
+  client-side in `TerminusApp._chat`, and a fresh system message from `build_context()` is
+  sent every turn. Tests use `tests/fake_hermes.py`.
+- `terminus/stats.py` computes the numbers and `widgets/stats_view.py` renders them. Stats
+  are recomputed only while the Stats view is visible.
 - Sessions: `task_id` NULL means free focus. `ON DELETE SET NULL` keeps logged time when a
   task is deleted.
 - `terminus/widgets/`: TodayView (`render_timeline` is a pure Text renderer), TasksView,
@@ -45,5 +52,6 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
 - Single-key app bindings are fine: focused `Input`s consume printable keys first
   (see `tests/test_app.py::test_typing_in_inputs_does_not_trigger_hotkeys`).
 - Actions that don't make sense while a modal is open go in `MAIN_SCREEN_ACTIONS`.
-- v2 (Stats and the Hermes agent client) is not built yet. The Stats and Agent views
-  are placeholders.
+- v3 (the agent proposes task changes, applied only after confirmation) is next. Hook it
+  into `TerminusApp._ask` and `agent_client.build_context`, whose system prompt currently
+  says the agent can't change the planner.

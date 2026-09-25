@@ -9,33 +9,31 @@ from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal
 from textual.screen import ModalScreen
-from textual.widgets import ContentSwitcher, Footer, Input, OptionList, Static
+from textual.widgets import ContentSwitcher, Footer, Input, Markdown, OptionList
+from textual.widgets.markdown import MarkdownStream
 
+from terminus import stats
+from terminus.agent_client import HermesClient, HermesError, build_context
 from terminus.config import Config
 from terminus.db import Database
 from terminus.models import DayPlan, Task
 from terminus.quickadd import ParsedTask, parse_quickadd
 from terminus.scheduler import plan_day
-from terminus.theme import GREEN, MUTED, RED, TERMINUS_THEME
+from terminus.theme import CYAN, GREEN, MUTED, RED, TERMINUS_THEME
 from terminus.todoist import TodoistError, TodoistSync
-from terminus.widgets import Sidebar, TaskModal, TasksView, TodayView
+from terminus.widgets import AgentConsole, Sidebar, StatsView, TaskModal, TasksView, TodayView
 from terminus.widgets.timeline import fmt_duration
 
 #: Actions that make no sense while a modal (e.g. the task form) is open.
 MAIN_SCREEN_ACTIONS = {
     "show", "new_task", "toggle_done", "toggle_focus", "agent",
-    "edit_task", "delete_task", "move_task", "quit", "sync", "do_today",
+    "edit_task", "delete_task", "move_task", "quit", "sync", "do_today", "new_chat",
 }  # fmt: skip
 
-
-def placeholder(view_id: str, title: str, body: str) -> Vertical:
-    return Vertical(
-        Static(title, classes="view-title"),
-        Static(body, classes="placeholder"),
-        id=view_id,
-    )
+#: Chat turns (user + assistant messages) sent to Hermes as history.
+CHAT_HISTORY = 20
 
 
 class TerminusApp(App):
@@ -62,6 +60,7 @@ class TerminusApp(App):
         db: Database | None = None,
         clock: Callable[[], datetime] = datetime.now,
         todoist: TodoistSync | None = None,
+        hermes: HermesClient | None = None,
     ) -> None:
         super().__init__()
         self.register_theme(TERMINUS_THEME)  # before CSS loads: it defines $muted/$faint
@@ -85,6 +84,12 @@ class TerminusApp(App):
             )
         self._syncing = False
         self._sync_again = False
+        self.hermes = hermes or HermesClient(
+            self.config.hermes_host, self.config.hermes_api_key, model=self.config.hermes_model
+        )
+        self._hermes_online: bool | None = None
+        self._chat: list[dict] = []
+        self._agent_busy = False
 
     # ── layout ───────────────────────────────────────────────────────────
 
@@ -94,19 +99,8 @@ class TerminusApp(App):
             with ContentSwitcher(initial="today", id="content"):
                 yield TodayView(id="today")
                 yield TasksView(id="tasks")
-                yield placeholder(
-                    "stats",
-                    "Stats",
-                    "Weekly deep-work hours and streak history arrive in v2.\n\n"
-                    "Focus sessions are already being logged, so v2 will have your history.",
-                )
-                yield placeholder(
-                    "agent",
-                    "AI Agent",
-                    "Chat with your remote Hermes agent here in v2.\n\n"
-                    "It will see today's plan and can propose task changes —\n"
-                    "nothing is applied until you confirm.",
-                )
+                yield StatsView(id="stats")
+                yield AgentConsole(id="agent")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -120,6 +114,12 @@ class TerminusApp(App):
         if self.todoist:
             self.set_interval(self.config.todoist_interval, self.request_sync)
             self.request_sync()
+        if self.hermes.api_key:
+            self.set_interval(60, self.check_hermes)
+            self.check_hermes()
+        else:
+            self.query_one(AgentConsole).show_setup()
+        self._update_agent_status()
 
     # ── state ────────────────────────────────────────────────────────────
 
@@ -160,6 +160,8 @@ class TerminusApp(App):
         free = active.elapsed(now) if active and active.task_id is None else None
         self.today_view.update_plan(self.plan, now, start, end, free)
         self.tasks_view.update_tasks(tasks, self.plan, worked, cfg.pomodoro)
+        if self.current_view == "stats":
+            self.query_one(StatsView).update_stats(stats.compute(self.db, now))
         self._update_status(now)
 
     def _update_status(self, now: datetime) -> None:
@@ -177,8 +179,22 @@ class TerminusApp(App):
             focus_task=(task.title if task else "Free focus") if active else None,
             pomodoro_left=left,
             pomodoro_number=number,
-            sync_line=self._sync_line(),
+            service_lines=[line for line in (self._sync_line(), self._hermes_line()) if line],
         )
+
+    def _hermes_line(self) -> Text | None:
+        if not self.hermes.api_key:
+            return None
+        line = Text("hermes   ", style=MUTED)
+        if self._agent_busy:
+            line.append("● thinking…", style=CYAN)
+        elif self._hermes_online is None:
+            line.append("● checking", style=MUTED)
+        elif self._hermes_online:
+            line.append("● online", style=GREEN)
+        else:
+            line.append("● offline", style=RED)
+        return line
 
     def _sync_line(self) -> Text | None:
         sync = self.todoist
@@ -290,9 +306,104 @@ class TerminusApp(App):
             self.tasks_view.focus_table()
         elif view == "today":
             self.query_one("#timeline-scroll").focus()
+        elif view == "stats":
+            self.query_one(StatsView).update_stats(stats.compute(self.db, self.now()))
+            self.query_one("#stats-scroll").focus()
+        elif view == "agent":
+            self.query_one(AgentConsole).focus_input()
 
     def action_agent(self) -> None:
         self.action_show("agent")
+
+    # ── hermes agent ─────────────────────────────────────────────────────
+
+    def check_hermes(self) -> None:
+        self.run_worker(self._check_hermes(), group="hermes-health", exclusive=True)
+
+    async def _check_hermes(self) -> None:
+        self._hermes_online = await self.hermes.health()
+        self._update_agent_status()
+        self._update_status(self.now())
+
+    def _update_agent_status(self) -> None:
+        self.query_one(AgentConsole).set_status(
+            configured=bool(self.hermes.api_key),
+            online=self._hermes_online,
+            host=self.hermes.base_url,
+            busy=self._agent_busy,
+        )
+
+    def _agent_context(self) -> str:
+        now = self.now()
+        active = self.db.active_session()
+        task = self.db.get_task(active.task_id) if active and active.task_id else None
+        return build_context(
+            self.plan,
+            now=now,
+            focus_today=self.db.focus_time_on(now.date(), now),
+            streak=self.db.streak(now.date()),
+            focus_task=(task.title if task else "free focus") if active else None,
+        )
+
+    @on(Input.Submitted, "#agent-input")
+    def _agent_submit(self, event: Input.Submitted) -> None:
+        prompt = event.value.strip()
+        if not prompt:
+            return
+        if self._agent_busy:
+            self.notify("Hermes is still answering…", severity="warning")
+            return
+        event.input.clear()
+        self.query_one(AgentConsole).add_user(prompt)
+        self._chat.append({"role": "user", "content": prompt})
+        self._agent_busy = True
+        self.run_worker(self._ask(), group="hermes-chat", exit_on_error=False)
+
+    async def _ask(self) -> None:
+        console = self.query_one(AgentConsole)
+        self._update_agent_status()
+        self._update_status(self.now())
+        reply, activity = console.start_reply()
+        # Opened on the first token: stopping a stream whose task never ran raises
+        # CancelledError into this worker and skips the cleanup below.
+        stream: MarkdownStream | None = None
+        answer = ""
+        messages = [{"role": "system", "content": self._agent_context()}]
+        messages += self._chat[-CHAT_HISTORY:]
+        try:
+            async for event in self.hermes.stream_chat(messages):
+                if event.kind == "token":
+                    answer += event.text
+                    stream = stream or Markdown.get_stream(reply)
+                    await stream.write(event.text)
+                else:
+                    activity.update(Text(f"⚙ {event.text}", style=MUTED))
+                console.log_area.scroll_end(animate=False)
+            self._hermes_online = True
+        except HermesError as exc:
+            console.add_error(str(exc))
+            if "reach" in str(exc) or "responding" in str(exc):
+                self._hermes_online = False
+        except Exception as exc:  # a client bug mustn't take the planner down
+            console.add_error(f"Unexpected error talking to Hermes: {exc}")
+        finally:
+            if stream is not None:
+                await stream.stop()
+            self._agent_busy = False
+            self._update_agent_status()
+            self._update_status(self.now())
+        if answer:
+            self._chat.append({"role": "assistant", "content": answer})
+        else:
+            self._chat.pop()  # unanswered: don't resend it as history next turn
+            reply.remove()
+
+    def action_new_chat(self) -> None:
+        if self._agent_busy:
+            return
+        self._chat.clear()
+        self.query_one(AgentConsole).clear()
+        self.notify("New conversation.")
 
     def action_new_task(self) -> None:
         self.push_screen(TaskModal(), self._add_parsed)

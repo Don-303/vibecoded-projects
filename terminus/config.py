@@ -55,12 +55,16 @@ class Config:
     todoist_token: str | None = None  # None disables Todoist sync
     todoist_project: str = "Terminus"
     todoist_interval: int = 60  # seconds between background syncs
+    hermes_host: str = "127.0.0.1"  # IP/hostname or URL; port 8642 assumed
+    hermes_api_key: str | None = None  # None: agent chat shows setup help
+    hermes_model: str = "hermes-agent"
 
     @classmethod
     def from_env(cls, env: os._Environ[str] | dict[str, str] = os.environ) -> Config:
         """Build a config from ``config.toml``, overridden by environment variables."""
         file = _config_file()
         planner, todoist = file.get("planner", {}), file.get("todoist", {})
+        hermes = file.get("hermes", {})
         return cls(
             db_path=Path(env.get("TERMINUS_DB", "")) if env.get("TERMINUS_DB") else _default_db_path(),
             day_start=_parse_hhmm(env.get("TERMINUS_DAY_START") or planner.get("day_start", "08:00")),
@@ -73,4 +77,7 @@ class Config:
             todoist_interval=max(
                 15, int(env.get("TODOIST_SYNC_SECONDS") or todoist.get("sync_seconds", 60))
             ),
+            hermes_host=env.get("HERMES_HOST") or hermes.get("host", "127.0.0.1"),
+            hermes_api_key=env.get("HERMES_API_KEY") or hermes.get("api_key") or None,
+            hermes_model=env.get("HERMES_MODEL") or hermes.get("model", "hermes-agent"),
         )
