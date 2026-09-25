@@ -57,3 +57,19 @@ def test_context_describes_the_day():
     assert "Find a job (overdue since Sep 12)" in ctx
     assert "apply for jobs (no date)" in ctx
     assert "Focus logged today: 32m. Streak: 3 days. Focus timer: Refactor." in ctx
+
+
+async def test_agent_failure_inside_stream_is_raised():
+    """The exact shape Hermes 0.21 sends when its model backend is missing."""
+    import httpx, json
+    chunk = {"id": "c", "object": "chat.completion.chunk", "model": "hermes-agent",
+             "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}],
+             "error": {"message": "HTTP 404: model 'ollama/hermes3:8b' not found", "type": "agent_error"},
+             "hermes": {"completed": False, "failed": True, "error": "HTTP 404: model 'ollama/hermes3:8b' not found"}}
+    body = ('data: {"choices": [{"index": 0, "delta": {"role": "assistant"}}]}\n\n'
+            f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n")
+    transport = httpx.MockTransport(lambda r: httpx.Response(
+        200, headers={"content-type": "text/event-stream"}, content=body.encode()))
+    client = HermesClient("box", "k", transport=transport)
+    with pytest.raises(HermesError, match="hermes3:8b' not found — Hermes' own LLM isn't available"):
+        [e async for e in client.stream_chat([])]

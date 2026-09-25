@@ -56,6 +56,14 @@ def _describe_tool(event: str, data: dict) -> str:
     return " · ".join(str(p) for p in parts) or event
 
 
+def _error_text(data: dict) -> str:
+    err = data.get("error") or (data.get("hermes") or {}).get("error") or "unknown error"
+    text = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+    if "not found" in text and "model" in text:
+        text += " — Hermes' own LLM isn't available on its machine (check its model/provider settings)"
+    return text
+
+
 class HermesClient:
     def __init__(
         self,
@@ -103,6 +111,8 @@ class HermesClient:
                     if "text/event-stream" not in resp.headers.get("content-type", ""):
                         # Server answered in one piece; accept that too.
                         data = json.loads(await resp.aread())
+                        if data.get("error") or (data.get("hermes") or {}).get("failed"):
+                            raise HermesError(f"Hermes failed: {_error_text(data)}")
                         content = data["choices"][0]["message"].get("content") or ""
                         if content:
                             yield ChatEvent("token", content)
@@ -142,13 +152,17 @@ class HermesClient:
             if event and event != "message":
                 yield ChatEvent("tool", _describe_tool(event, data))
                 continue
-            if "error" in data and not data.get("choices"):
-                err = data["error"]
-                raise HermesError(f"Hermes: {err.get('message', err) if isinstance(err, dict) else err}")
             for choice in data.get("choices", []):
                 content = (choice.get("delta") or {}).get("content")
                 if content:
                     yield ChatEvent("token", content)
+            # Hermes reports agent failures (e.g. its model backend is down) inside a
+            # normal chunk: finish_reason "error" plus an "error" object.
+            failed = data.get("error") or (data.get("hermes") or {}).get("failed") or any(
+                c.get("finish_reason") == "error" for c in data.get("choices", [])
+            )
+            if failed:
+                raise HermesError(f"Hermes failed: {_error_text(data)}")
 
 
 def build_context(
