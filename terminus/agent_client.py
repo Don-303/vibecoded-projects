@@ -213,8 +213,9 @@ def build_context(
         "Every task listed above already exists in the planner — never tell the user to add "
         "one of them again; for an overdue one, tell them to select it in Tasks [2] and press t. "
         "You can't change the planner directly yet. If the user wants changes, say exactly "
-        "what to do in Terminus: n = new task (quick-add syntax `Title #tag ~2 @14:30`, where "
-        "~2 means two 25-minute pomodoros, not minutes), space = mark done, t = move an "
-        "overdue task onto today, f = start focus, e = edit.",
+        "what to do in Terminus: n = new task (quick-add syntax `Title #tag ~N @HH:MM`, where "
+        "~N means N 25-minute pomodoros, not minutes, and @HH:MM is optional), space = mark "
+        "done, t = move an overdue task onto today, f = start focus, e = edit. Only suggest "
+        "times later than now.",
     ]
     return "\n".join(lines)
