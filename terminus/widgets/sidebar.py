@@ -38,6 +38,7 @@ class Sidebar(Vertical):
         focus_task: str | None,
         pomodoro_left: timedelta | None,
         pomodoro_number: int,
+        sync_line: Text | None = None,
     ) -> None:
         text = Text()
         text.append(f"{now:%H:%M}\n", style=f"bold {CYAN}")
@@ -55,4 +56,7 @@ class Sidebar(Vertical):
             text.append(f"{focus_task}\n", style=CYAN)
             secs = int(pomodoro_left.total_seconds()) if pomodoro_left else 0
             text.append(f"pomodoro {pomodoro_number} · {secs // 60:02d}:{secs % 60:02d} left", style=AMBER)
+        if sync_line is not None:
+            text.append("\n\n")
+            text.append_text(sync_line)
         self.query_one("#status", Static).update(text)

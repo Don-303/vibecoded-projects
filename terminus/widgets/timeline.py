@@ -55,12 +55,12 @@ def _header(block: Block, now: datetime, first_next: bool) -> Text:
 
 def render_timeline(plan: DayPlan, now: datetime, start: datetime, end: datetime) -> tuple[Text, int]:
     """Render the plan as an agenda. Returns the text and the line index of "now"."""
-    # (time, order, line) — order breaks ties: headers, then now, then fillers.
+    # (time, order, line) — order breaks ties: now, then headers, then fillers.
     rows: list[tuple[datetime, int, Text]] = []
     first_next = plan.up_next
 
     for block in plan.blocks:
-        rows.append((block.start, 0, _header(block, now, block is first_next)))
+        rows.append((block.start, 1, _header(block, now, block is first_next)))
         color = STATE_COLOR[block.state]
         n = max(1, round(block.duration / ROW))
         for k in range(1, n):
@@ -77,13 +77,13 @@ def render_timeline(plan: DayPlan, now: datetime, start: datetime, end: datetime
             rows.append((hour, 3, Text.assemble((f"{hour:%H:%M} ", MUTED), ("┆", FAINT))))
         hour += timedelta(hours=1)
 
-    rows.append((now, 1, Text(f"{now:%H:%M} ◀━━ now", style=f"bold {CYAN}")))
+    rows.append((now, 0, Text(f"{now:%H:%M} ◀━━ now", style=f"bold {CYAN}")))
     rows.sort(key=lambda r: (r[0], r[1]))
 
     text = Text(no_wrap=True, overflow="ellipsis")
     now_line = 0
     for i, (_, order, line) in enumerate(rows):
-        if order == 1:
+        if order == 0:
             now_line = i
         text.append_text(line)
         text.append("\n")
@@ -96,11 +96,13 @@ def render_timeline(plan: DayPlan, now: datetime, start: datetime, end: datetime
     return text, now_line
 
 
-def summary(plan: DayPlan) -> Text:
+def summary(plan: DayPlan, free_focus: timedelta | None = None) -> Text:
     counts = {s: 0 for s in BlockState}
     for b in plan.blocks:
         counts[b.state] += 1
     text = Text()
+    if free_focus is not None:
+        text.append(f"▶ free focus {fmt_duration(free_focus)}   ", style=f"bold {CYAN}")
     labels = [
         (BlockState.DONE, "done"),
         (BlockState.RUNNING, "running"),
@@ -127,9 +129,16 @@ class TodayView(Vertical):
         with VerticalScroll(id="timeline-scroll"):
             yield Static(id="timeline")
 
-    def update_plan(self, plan: DayPlan, now: datetime, start: datetime, end: datetime) -> None:
+    def update_plan(
+        self,
+        plan: DayPlan,
+        now: datetime,
+        start: datetime,
+        end: datetime,
+        free_focus: timedelta | None = None,
+    ) -> None:
         self.query_one("#today-title", Static).update(f"Today · {now:%A %d %B}")
-        self.query_one("#today-summary", Static).update(summary(plan))
+        self.query_one("#today-summary", Static).update(summary(plan, free_focus))
         text, now_line = render_timeline(plan, now, start, end)
         self.query_one("#timeline", Static).update(text)
         if not self._scrolled_once:

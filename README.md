@@ -37,6 +37,38 @@ Requires Python 3.11+.
   Free focus (`F`, or `f` with no tasks) logs time without a task, and still counts toward
   focus time and streaks. Deleting a task keeps its logged time.
 
+## Todoist sync (add and remove tasks from your phone)
+
+Terminus syncs two ways with **one Todoist project**, called `Terminus` by default. It
+creates the project on the first sync if it doesn't exist.
+
+1. Get your API token: Todoist → Settings → Integrations → Developer → *API token*.
+2. Save it where Terminus can read it:
+   ```bash
+   mkdir -p ~/.config/terminus
+   echo 'YOUR_TOKEN' > ~/.config/terminus/todoist-token && chmod 600 ~/.config/terminus/todoist-token
+   ```
+   Or export `TODOIST_API_TOKEN` instead.
+3. Start Terminus. The sidebar shows `todoist ✓ HH:MM` after each successful sync.
+
+| On your phone (in the Terminus project) | In Terminus |
+|---|---|
+| Add a task with no date | Shows on today |
+| Give it a date / a time | Goes on that day / is pinned at that time |
+| Overdue task | Shows on today (the old time is dropped) |
+| Labels | Tags |
+| `~2` at the end of the title, or a duration | Estimate in pomodoros |
+| Complete / uncomplete / delete | Done / reopened / removed |
+| Move it to another project | Removed |
+
+Tasks you add, edit, complete or delete in Terminus go to Todoist straight away, due on
+their day. Terminus syncs on startup, every 60 seconds, after every change, and when
+you press `r`. Changes made offline wait in a queue in the database and go out on the
+next successful sync. When a task was changed in both places, the Terminus edit wins.
+
+Not synced: task order within the day, focus sessions, and the move of unfinished
+tasks to the next day (Todoist already shows those as overdue).
+
 ## Keys
 
 | Key | Where | Action |
@@ -47,6 +79,7 @@ Requires Python 3.11+.
 | `f` | anywhere | Start or pause focus on the selected or next task. With no tasks, starts free focus |
 | `F` | anywhere | Start or pause free focus (not tied to any task) |
 | `/` | anywhere | Agent view |
+| `r` | anywhere | Sync with Todoist now (only when a token is set) |
 | `q` | anywhere | Quit |
 | `a` | Tasks | Quick-add bar |
 | `s` | Tasks | Search (text, or `#tag`) |
@@ -67,6 +100,9 @@ estimate in pomodoros, and `@HH:MM` pins the task to a start time (`@9` and `@93
 | `TERMINUS_DAY_START` | `08:00` | Timeline start |
 | `TERMINUS_DAY_END` | `20:00` | Timeline end; floating tasks that don't fit by then overflow |
 | `TERMINUS_POMODORO_MIN` | `25` | Pomodoro length in minutes |
+| `TODOIST_API_TOKEN` | contents of `~/.config/terminus/todoist-token` | Turns on Todoist sync |
+| `TODOIST_PROJECT` | `Terminus` | Project to sync (`Inbox` works too) |
+| `TODOIST_SYNC_SECONDS` | `60` | Seconds between background syncs (minimum 15) |
 
 ## Tests
 
@@ -74,7 +110,9 @@ estimate in pomodoros, and `@HH:MM` pins the task to a start time (`@9` and `@93
 .venv/bin/python -m pytest
 ```
 
-The scheduler, database and quick-add parser have unit tests. The UI is tested
+The scheduler, database, quick-add parser and Todoist sync have unit tests. The sync is
+tested against an in-memory fake of Todoist's Sync API (`tests/fake_todoist.py`), so
+tests never touch your real account. The UI is tested
 headlessly with Textual's Pilot, using an injectable fake clock.
 
 ## Roadmap

@@ -119,3 +119,65 @@ async def test_shift_f_is_free_focus_even_with_tasks(config, clock):
         assert app.db.active_session().task_id is None
         await pilot.press("F")
         assert app.db.active_session() is None
+
+
+# ── Todoist ──
+
+def make_synced_app(config, clock):
+    from fake_todoist import FakeTodoist
+    from terminus.todoist import TodoistSync
+    fake = FakeTodoist()
+    db = Database(":memory:")
+    sync = TodoistSync(db, "secret", clock=clock, transport=fake.transport)
+    return TerminusApp(config=config, db=db, clock=clock, todoist=sync), fake
+
+
+async def test_todoist_round_trip_through_ui(config, clock):
+    app, fake = make_synced_app(config, clock)
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()  # initial sync creates the project
+        assert any(p["name"] == "Terminus" for p in fake.projects.values())
+
+        # phone → terminus, pulled with `r`
+        iid = fake.phone_add("From phone ~2")
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert [t.title for t in app.db.tasks_for_day(clock.now.date())] == ["From phone"]
+
+        # terminus → phone: quick add, then complete
+        await pilot.press("2", "a", *"From laptop", "enter", "escape")
+        await app.workers.wait_for_complete()
+        assert fake.item_named("From laptop")["due"] == {"date": "2026-09-25"}
+        await pilot.press("space")  # cursor is on the first row: From phone
+        await app.workers.wait_for_complete()
+        assert fake.items[iid]["checked"]
+
+        # phone deletes → gone locally
+        fake.phone_delete(fake.item_named("From laptop")["id"])
+        await pilot.press("r")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert [t.title for t in app.db.tasks_for_day(clock.now.date())] == ["From phone"]
+
+
+async def test_todoist_offline_does_not_break_the_app(config, clock):
+    app, fake = make_synced_app(config, clock)
+    fake.online = False
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.press("2", "a", *"Queued", "enter")
+        await app.workers.wait_for_complete()
+        assert app.todoist.pending() == 1
+        assert "offline" in app._sync_line().plain
+        fake.online = True
+        await pilot.press("escape", "r")
+        await app.workers.wait_for_complete()
+        assert app.todoist.pending() == 0
+        assert "✓" in app._sync_line().plain
+
+
+async def test_sync_key_hidden_without_todoist(config, clock):
+    app = make_app(config, clock)
+    async with app.run_test():
+        assert app.check_action("sync", ()) is False

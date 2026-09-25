@@ -21,6 +21,15 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
 - `terminus/app.py`: `TerminusApp` owns the DB. The clock is injectable (`clock=`) so
   tests can drive time. `refresh_all()` re-reads the DB, re-plans and redraws. `_tick`
   runs every second for the live timer, the minute re-plan and midnight carry-over.
+- `terminus/todoist.py`: two-way sync with one Todoist project via Sync API v1
+  (`POST /api/v1/sync`). Local changes are queued in `todoist_outbox`, and commands carry
+  stable uuids, so a retried batch is de-duplicated by Todoist. Temp ids map to real ids
+  through `temp_id_mapping`. Remote items that still have a pending local command are
+  skipped, so the local edit wins. The app calls `self._pushed(TodoistSync.queue_*, ...)`
+  after every mutation. **Any new mutation in the app must do the same.** Tests use
+  `tests/fake_todoist.py` (httpx MockTransport) and never reach the network.
+- Sessions: `task_id` NULL means free focus. `ON DELETE SET NULL` keeps logged time when a
+  task is deleted.
 - `terminus/widgets/`: TodayView (`render_timeline` is a pure Text renderer), TasksView,
   Sidebar, and TaskModal.
 - Theme: `terminus/theme.py` registers the `terminus` Textual theme. It must be registered

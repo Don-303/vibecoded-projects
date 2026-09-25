@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -17,14 +18,15 @@ from terminus.db import Database
 from terminus.models import DayPlan, Task
 from terminus.quickadd import ParsedTask, parse_quickadd
 from terminus.scheduler import plan_day
-from terminus.theme import TERMINUS_THEME
+from terminus.theme import GREEN, MUTED, RED, TERMINUS_THEME
+from terminus.todoist import TodoistError, TodoistSync
 from terminus.widgets import Sidebar, TaskModal, TasksView, TodayView
 from terminus.widgets.timeline import fmt_duration
 
 #: Actions that make no sense while a modal (e.g. the task form) is open.
 MAIN_SCREEN_ACTIONS = {
     "show", "new_task", "toggle_done", "toggle_focus", "agent",
-    "edit_task", "delete_task", "move_task", "quit",
+    "edit_task", "delete_task", "move_task", "quit", "sync",
 }  # fmt: skip
 
 
@@ -50,6 +52,7 @@ class TerminusApp(App):
         Binding("f", "toggle_focus", "Focus"),
         Binding("F", "toggle_focus(True)", "Free focus", show=False),
         Binding("slash", "agent", "Agent"),
+        Binding("r", "sync", "Sync"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -58,6 +61,7 @@ class TerminusApp(App):
         config: Config | None = None,
         db: Database | None = None,
         clock: Callable[[], datetime] = datetime.now,
+        todoist: TodoistSync | None = None,
     ) -> None:
         super().__init__()
         self.register_theme(TERMINUS_THEME)  # before CSS loads: it defines $muted/$faint
@@ -70,6 +74,17 @@ class TerminusApp(App):
         self._day = self.now().date()
         self._pomos_notified = 0
         self._pending_delete: tuple[int, datetime] | None = None
+        self.todoist = todoist
+        if todoist is None and self.config.todoist_token:
+            self.todoist = TodoistSync(
+                self.db,
+                self.config.todoist_token,
+                project_name=self.config.todoist_project,
+                pomodoro=self.config.pomodoro,
+                clock=self.now,
+            )
+        self._syncing = False
+        self._sync_again = False
 
     # ── layout ───────────────────────────────────────────────────────────
 
@@ -102,6 +117,9 @@ class TerminusApp(App):
             self._pomos_notified = int(active.elapsed(self.now()) / self.config.pomodoro)
         self.refresh_all()
         self.set_interval(1, self._tick)
+        if self.todoist:
+            self.set_interval(self.config.todoist_interval, self.request_sync)
+            self.request_sync()
 
     # ── state ────────────────────────────────────────────────────────────
 
@@ -138,7 +156,9 @@ class TerminusApp(App):
         )
         start = datetime.combine(self._day, cfg.day_start)
         end = datetime.combine(self._day, cfg.day_end)
-        self.today_view.update_plan(self.plan, now, start, end)
+        active = self.db.active_session()
+        free = active.elapsed(now) if active and active.task_id is None else None
+        self.today_view.update_plan(self.plan, now, start, end, free)
         self.tasks_view.update_tasks(tasks, self.plan, worked, cfg.pomodoro)
         self._update_status(now)
 
@@ -157,7 +177,26 @@ class TerminusApp(App):
             focus_task=(task.title if task else "Free focus") if active else None,
             pomodoro_left=left,
             pomodoro_number=number,
+            sync_line=self._sync_line(),
         )
+
+    def _sync_line(self) -> Text | None:
+        sync = self.todoist
+        if sync is None:
+            return None
+        line = Text("todoist  ", style=MUTED)
+        pending = sync.pending()
+        if self._syncing:
+            line.append("syncing…", style=MUTED)
+        elif sync.last_error:
+            line.append("✗ offline" if "offline" in sync.last_error else "✗ error", style=RED)
+        elif sync.last_synced:
+            line.append(f"✓ {sync.last_synced:%H:%M}", style=GREEN)
+        else:
+            line.append("waiting", style=MUTED)
+        if pending:
+            line.append(f" · {pending} queued", style=MUTED)
+        return line
 
     def _tick(self) -> None:
         """Runs every second: live timer, minute re-plan, midnight rollover."""
@@ -192,10 +231,55 @@ class TerminusApp(App):
             task_id = block.task.id if block else None
         return self.db.get_task(task_id) if task_id is not None else None
 
+    # ── todoist ──────────────────────────────────────────────────────────
+
+    def request_sync(self) -> None:
+        """Sync with Todoist in the background; coalesces overlapping requests."""
+        if self.todoist is None:
+            return
+        if self._syncing:
+            self._sync_again = True
+            return
+        self._syncing = True
+        self.run_worker(self._run_sync(), group="todoist", exit_on_error=False)
+
+    async def _run_sync(self) -> None:
+        assert self.todoist is not None
+        try:
+            while True:
+                self._sync_again = False
+                self._update_status(self.now())
+                try:
+                    result = await self.todoist.sync()
+                    for error in result.errors:
+                        self.notify(f"Todoist: {error}", severity="warning")
+                except TodoistError as exc:
+                    self.log.warning(f"todoist sync failed: {exc}")
+                except Exception as exc:  # never let a sync bug take the planner down
+                    self.todoist.last_error = str(exc)
+                    self.notify(f"Todoist sync crashed: {exc}", severity="error")
+                    break
+                if not self._sync_again:
+                    break
+        finally:
+            self._syncing = False
+            self.refresh_all()
+
+    def action_sync(self) -> None:
+        self.request_sync()
+
+    def _pushed(self, queue: Callable[..., None], *args) -> None:
+        """Queue a change for Todoist (if enabled) and sync it right away."""
+        if self.todoist is not None:
+            queue(self.todoist, *args)
+            self.request_sync()
+
     # ── actions ──────────────────────────────────────────────────────────
 
     def check_action(self, action: str, parameters: tuple) -> bool | None:
         if action in MAIN_SCREEN_ACTIONS and isinstance(self.screen, ModalScreen):
+            return False
+        if action == "sync" and self.todoist is None:
             return False
         return True
 
@@ -216,7 +300,7 @@ class TerminusApp(App):
     def _add_parsed(self, parsed: ParsedTask | None) -> None:
         if parsed is None:
             return
-        self.db.add_task(
+        task_id = self.db.add_task(
             parsed.title,
             self._day,
             estimate=parsed.estimate,
@@ -224,6 +308,7 @@ class TerminusApp(App):
             fixed_start=parsed.fixed_start,
             now=self.now(),
         )
+        self._pushed(TodoistSync.queue_add, task_id)
         self.refresh_all()
         if parsed.fixed_start is None and any(t.title == parsed.title for t in self.plan.overflow):
             self.notify(f"Added “{parsed.title}” — it won't fit today.", severity="warning")
@@ -244,6 +329,7 @@ class TerminusApp(App):
                     tags=parsed.tags,
                     fixed_start=parsed.fixed_start,
                 )
+                self._pushed(TodoistSync.queue_update, task, self.db.get_task(task.id))
                 self.refresh_all()
 
         self.push_screen(TaskModal(task), save)
@@ -259,6 +345,7 @@ class TerminusApp(App):
             active = self.db.active_session()
             if active and active.task_id == task.id:
                 self.db.stop_session(now)  # its logged time is kept as free focus
+            self._pushed(TodoistSync.queue_delete, task.id)  # before the row (and its id) goes
             self.db.delete_task(task.id)
             self.notify(f"Deleted “{task.title}”.")
             self.refresh_all()
@@ -290,12 +377,14 @@ class TerminusApp(App):
         now = self.now()
         if task.done:
             self.db.set_done(task.id, False, now)
+            self._pushed(TodoistSync.queue_done, task.id, False)
             self.notify(f"Reopened “{task.title}”.")
         else:
             active = self.db.active_session()
             if active and active.task_id == task.id:
                 self.db.stop_session(now)
             self.db.set_done(task.id, True, now)
+            self._pushed(TodoistSync.queue_done, task.id, True)
             self.notify(f"Done: “{task.title}”. Remaining blocks re-planned.")
         self.refresh_all()
 
