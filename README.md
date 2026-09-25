@@ -39,8 +39,17 @@ Requires Python 3.11+.
 
 ## Todoist sync (add and remove tasks from your phone)
 
-Terminus syncs two ways with **one Todoist project**, called `Terminus` by default. It
-creates the project on the first sync if it doesn't exist.
+Terminus syncs two ways with **one Todoist project**: `Terminus` by default (created on the
+first sync if it doesn't exist), or your `Inbox`, so anything you quick-add on your phone
+shows up. Choose it in `~/.config/terminus/config.toml`:
+
+```toml
+[todoist]
+project = "Inbox"
+# sync_seconds = 60
+```
+
+When you switch projects, the next sync pulls the new project in full.
 
 1. Get your API token: Todoist → Settings → Integrations → Developer → *API token*.
 2. Save it where Terminus can read it:
@@ -93,6 +102,9 @@ Quick-add syntax: `Write report #work #deep ~2 @14:30`. `#tag` adds a tag, `~N` 
 estimate in pomodoros, and `@HH:MM` pins the task to a start time (`@9` and `@930` work too).
 
 ## Configuration
+
+Settings come from `~/.config/terminus/config.toml` (the `[todoist]` table), and the
+environment variables below override it.
 
 | Variable | Default | |
 |---|---|---|

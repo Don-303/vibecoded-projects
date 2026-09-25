@@ -197,14 +197,20 @@ class TodoistSync:
         return resp.json()
 
     async def _ensure_project(self, client: httpx.AsyncClient) -> str:
+        if self._get("project_name") != self.project_name:
+            # Configured project changed: forget the old one and pull the new one in full.
+            self._set("project_id", None)
+            self._set("sync_token", None)
+            self._set("project_name", self.project_name)
         project_id = self._get("project_id")
         if project_id:
             return project_id
         # A projects-only full sync. Its token covers projects alone, so don't keep it.
         data = await self._post(client, {"sync_token": "*", "resource_types": '["projects"]'})
         for p in data.get("projects", []):
-            if (p["name"].lower() == self.project_name.lower()
-                    and not p.get("is_deleted") and not p.get("is_archived")):
+            wanted = self.project_name.lower()
+            named = p["name"].lower() == wanted or (wanted == "inbox" and p.get("inbox_project"))
+            if named and not p.get("is_deleted") and not p.get("is_archived"):
                 project_id = p["id"]
                 break
         else:

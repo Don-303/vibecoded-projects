@@ -230,3 +230,23 @@ async def test_full_resync_closes_tasks_missing_remotely(db, fake, sync):
     sync._set("sync_token", "*")  # e.g. token expired → server sends a full sync
     await sync.sync()
     assert only_task(db).done
+
+
+async def test_switching_project_resyncs_from_scratch(db, fake, clock):
+    fake.add_project("Inbox")
+    first = TodoistSync(db, "secret", clock=clock, transport=fake.transport)
+    await first.sync()
+    fake.phone_add("In inbox", project="Inbox")
+    await first.sync()
+    assert db.tasks_for_day(DAY) == []  # not the synced project
+    inbox = TodoistSync(db, "secret", project_name="Inbox", clock=clock, transport=fake.transport)
+    await inbox.sync()
+    assert [t.title for t in db.tasks_for_day(DAY)] == ["In inbox"]
+
+
+async def test_inbox_matched_by_flag(db, fake, clock):
+    pid = fake.add_project("Eingang")  # localized inbox name
+    fake.projects[pid]["inbox_project"] = True
+    sync = TodoistSync(db, "secret", project_name="Inbox", clock=clock, transport=fake.transport)
+    await sync.sync()
+    assert sync._get("project_id") == pid

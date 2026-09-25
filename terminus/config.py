@@ -6,6 +6,7 @@ Every setting has a sensible default so Terminus runs with zero setup.
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass
 from datetime import time, timedelta
 from pathlib import Path
@@ -31,6 +32,15 @@ def _todoist_token(env) -> str | None:
         return None
 
 
+def _config_file() -> dict:
+    """``~/.config/terminus/config.toml`` — optional; env vars override it."""
+    try:
+        with open(_config_dir() / "config.toml", "rb") as f:
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
 def _parse_hhmm(value: str) -> time:
     hours, _, minutes = value.partition(":")
     return time(int(hours), int(minutes or 0))
@@ -48,13 +58,16 @@ class Config:
 
     @classmethod
     def from_env(cls, env: os._Environ[str] | dict[str, str] = os.environ) -> Config:
-        """Build a config from ``TERMINUS_*`` environment variables."""
+        """Build a config from ``config.toml``, overridden by environment variables."""
+        todoist = _config_file().get("todoist", {})
         return cls(
             db_path=Path(env.get("TERMINUS_DB", "")) if env.get("TERMINUS_DB") else _default_db_path(),
             day_start=_parse_hhmm(env.get("TERMINUS_DAY_START", "08:00")),
             day_end=_parse_hhmm(env.get("TERMINUS_DAY_END", "20:00")),
             pomodoro=timedelta(minutes=int(env.get("TERMINUS_POMODORO_MIN", "25"))),
             todoist_token=_todoist_token(env),
-            todoist_project=env.get("TODOIST_PROJECT", "Terminus"),
-            todoist_interval=max(15, int(env.get("TODOIST_SYNC_SECONDS", "60"))),
+            todoist_project=env.get("TODOIST_PROJECT") or todoist.get("project", "Terminus"),
+            todoist_interval=max(
+                15, int(env.get("TODOIST_SYNC_SECONDS") or todoist.get("sync_seconds", 60))
+            ),
         )
