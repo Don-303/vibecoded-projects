@@ -57,7 +57,7 @@ creates the project on the first sync if it doesn't exist.
 | Give it a date / a time | Goes on that day / is pinned at that time |
 | Overdue task | Shows on today (the old time is dropped) |
 | Labels | Tags |
-| `~2` at the end of the title, or a duration | Estimate in pomodoros |
+| `~2` at the end of the title (or a duration, which may need Todoist Pro) | Estimate in pomodoros |
 | Complete / uncomplete / delete | Done / reopened / removed |
 | Move it to another project | Removed |
 
