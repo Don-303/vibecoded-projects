@@ -58,6 +58,11 @@ class Config:
     hermes_host: str = "127.0.0.1"  # IP/hostname or URL; port 8642 assumed
     hermes_api_key: str | None = None  # None: agent chat shows setup help
     hermes_model: str = "hermes-agent"
+    brief_time: time | None = time(6, 0)  # auto-generate after this; None = only on demand
+    brief_feeds: dict[str, str] | None = None  # None: terminus.brief.FINANCE_FEEDS
+    gmail_address: str | None = None
+    gmail_app_password: str | None = None
+    gmail_query: str = "newer_than:1d category:primary"
 
     @classmethod
     def from_env(cls, env: os._Environ[str] | dict[str, str] = os.environ) -> Config:
@@ -65,6 +70,8 @@ class Config:
         file = _config_file()
         planner, todoist = file.get("planner", {}), file.get("todoist", {})
         hermes = file.get("hermes", {})
+        brief, gmail = file.get("brief", {}), file.get("gmail", {})
+        brief_at = brief.get("time", "06:00")  # "" or false: only on demand (g)
         return cls(
             db_path=Path(env.get("TERMINUS_DB", "")) if env.get("TERMINUS_DB") else _default_db_path(),
             day_start=_parse_hhmm(env.get("TERMINUS_DAY_START") or planner.get("day_start", "08:00")),
@@ -80,4 +87,10 @@ class Config:
             hermes_host=env.get("HERMES_HOST") or hermes.get("host", "127.0.0.1"),
             hermes_api_key=env.get("HERMES_API_KEY") or hermes.get("api_key") or None,
             hermes_model=env.get("HERMES_MODEL") or hermes.get("model", "hermes-agent"),
+            brief_time=_parse_hhmm(brief_at) if brief_at else None,
+            brief_feeds=brief.get("feeds") or None,
+            gmail_address=env.get("GMAIL_ADDRESS") or gmail.get("address") or None,
+            gmail_app_password=(env.get("GMAIL_APP_PASSWORD") or gmail.get("app_password") or "")
+            .replace(" ", "") or None,  # Google shows it as "abcd efgh ijkl mnop"
+            gmail_query=gmail.get("query", "newer_than:1d category:primary"),
         )

@@ -139,9 +139,15 @@ class TodayView(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static(id="today-title", classes="view-title")
+        yield Static(id="today-brief")
         yield Static(id="today-summary")
         with VerticalScroll(id="timeline-scroll"):
             yield Static(id="timeline")
+
+    def set_brief_banner(self, text: Text | None) -> None:
+        banner = self.query_one("#today-brief", Static)
+        banner.update(text or "")
+        banner.display = text is not None
 
     def update_plan(
         self,

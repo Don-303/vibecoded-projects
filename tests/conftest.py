@@ -17,8 +17,9 @@ def db():
 
 @pytest.fixture
 def config(tmp_path):
+    # brief_time=None: no automatic brief (it would hit the real news feeds)
     return Config(db_path=tmp_path / "t.db", day_start=time(8), day_end=time(20),
-                  pomodoro=timedelta(minutes=25))
+                  pomodoro=timedelta(minutes=25), brief_time=None)
 
 
 class FakeClock:

@@ -211,3 +211,25 @@ Footer {
 #agent-input {
     margin-top: 1;
 }
+
+/* ── brief ───────────────────────────────────────────────── */
+
+#today-brief {
+    margin-bottom: 1;
+}
+
+#brief-status {
+    margin-bottom: 1;
+}
+
+#brief-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $faint;
+    scrollbar-background: $background;
+}
+
+#brief-body {
+    background: $background;
+    padding: 0;
+}

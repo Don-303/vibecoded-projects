@@ -14,7 +14,7 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Input, Markdown, OptionList
 from textual.widgets.markdown import MarkdownStream
 
-from terminus import stats
+from terminus import brief, stats
 from terminus.agent_client import HermesClient, HermesError, build_context
 from terminus.config import Config
 from terminus.db import Database
@@ -23,13 +23,23 @@ from terminus.quickadd import ParsedTask, parse_quickadd
 from terminus.scheduler import plan_day
 from terminus.theme import CYAN, GREEN, MUTED, RED, TERMINUS_THEME
 from terminus.todoist import TodoistError, TodoistSync
-from terminus.widgets import AgentConsole, Sidebar, StatsView, TaskModal, TasksView, TodayView
+from terminus.widgets import (
+    AgentConsole,
+    BriefView,
+    Sidebar,
+    StatsView,
+    TaskModal,
+    TasksView,
+    TodayView,
+)
+from terminus.widgets.brief_view import EMPTY as BRIEF_EMPTY
 from terminus.widgets.timeline import fmt_duration
 
 #: Actions that make no sense while a modal (e.g. the task form) is open.
 MAIN_SCREEN_ACTIONS = {
     "show", "new_task", "toggle_done", "toggle_focus", "agent",
     "edit_task", "delete_task", "move_task", "quit", "sync", "do_today", "new_chat",
+    "make_brief",
 }  # fmt: skip
 
 #: Chat turns (user + assistant messages) sent to Hermes as history.
@@ -45,6 +55,7 @@ class TerminusApp(App):
         Binding("2", "show('tasks')", "Tasks", show=False),
         Binding("3", "show('stats')", "Stats", show=False),
         Binding("4", "show('agent')", "Agent", show=False),
+        Binding("5", "show('brief')", "Brief", show=False),
         Binding("n", "new_task", "New"),
         Binding("space", "toggle_done", "Done"),
         Binding("f", "toggle_focus", "Focus"),
@@ -90,6 +101,8 @@ class TerminusApp(App):
         self._hermes_online: bool | None = None
         self._chat: list[dict] = []
         self._agent_busy = False
+        self._briefing = False
+        self._brief_seen: object = None  # the day whose brief the user has opened
 
     # ── layout ───────────────────────────────────────────────────────────
 
@@ -101,6 +114,7 @@ class TerminusApp(App):
                 yield TasksView(id="tasks")
                 yield StatsView(id="stats")
                 yield AgentConsole(id="agent")
+                yield BriefView(id="brief")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -120,6 +134,8 @@ class TerminusApp(App):
         else:
             self.query_one(AgentConsole).show_setup()
         self._update_agent_status()
+        self._load_brief()
+        self.maybe_brief()
 
     # ── state ────────────────────────────────────────────────────────────
 
@@ -220,11 +236,13 @@ class TerminusApp(App):
         if now.date() != self._day:
             self._day = now.date()
             self.db.carry_over(self._day)
+            self._load_brief()
         minute = now.replace(second=0)
         active = self.db.active_session()
         if minute != self._last_minute:
             self._last_minute = minute
             self.refresh_all()
+            self.maybe_brief()
         elif active:
             self._update_status(now)
         if active:
@@ -309,6 +327,10 @@ class TerminusApp(App):
         elif view == "stats":
             self.query_one(StatsView).update_stats(stats.compute(self.db, self.now()))
             self.query_one("#stats-scroll").focus()
+        elif view == "brief":
+            self._brief_seen = self._day
+            self._update_brief_banner()
+            self.query_one("#brief-scroll").focus()
         elif view == "agent":
             self.query_one(AgentConsole).focus_input()
 
@@ -397,6 +419,100 @@ class TerminusApp(App):
         else:
             self._chat.pop()  # unanswered: don't resend it as history next turn
             reply.remove()
+
+    # ── morning brief ────────────────────────────────────────────────────
+
+    def maybe_brief(self) -> None:
+        """Write today's brief once it's past the configured time, if there isn't one."""
+        at = self.config.brief_time
+        if (at is not None and not self._briefing and self.now().time() >= at
+                and self.db.get_brief(self._day) is None):
+            self.action_make_brief()
+
+    def action_make_brief(self) -> None:
+        if self._briefing:
+            return
+        self._briefing = True
+        self._update_brief_banner()
+        self.run_worker(self._make_brief(), group="brief", exit_on_error=False)
+
+    async def _make_brief(self) -> None:
+        view = self.query_one(BriefView)
+        cfg = self.config
+        day = self._day
+        try:
+            view.set_status("Gathering email and news…", busy=True)
+            inputs = await brief.gather(
+                now=self.now(),
+                gmail_address=cfg.gmail_address,
+                gmail_password=cfg.gmail_app_password,
+                gmail_query=cfg.gmail_query,
+                feeds=cfg.brief_feeds or brief.FINANCE_FEEDS,
+            )
+            markdown, by_hermes, note = None, False, ""
+            if self.hermes.api_key:
+                view.show(brief.raw_digest(inputs))  # something to read while Hermes writes
+                view.set_status("Hermes is writing your brief…", busy=True)
+                markdown, note = await self._write_brief(view, inputs)
+                by_hermes = markdown is not None
+            else:
+                note = "Connect Hermes ([4] AI Agent) to get this written up as a short brief."
+            if markdown is None:
+                markdown = brief.raw_digest(inputs, note=note)
+            self.db.save_brief(day, markdown, by_hermes, self.now())
+        except Exception as exc:  # never let the brief take the planner down
+            view.set_status(f"Couldn't make the brief: {exc}", error=True)
+            self._briefing = False
+            self._update_brief_banner()
+            return
+        self._briefing = False
+        self._load_brief()
+
+    async def _write_brief(self, view: BriefView, inputs: brief.BriefInputs) -> tuple[str | None, str]:
+        """Stream Hermes' write-up into the view. Returns (markdown or None, note)."""
+        messages = brief.build_messages(inputs, self._agent_context())
+        stream: MarkdownStream | None = None
+        text = ""
+        try:
+            async for event in self.hermes.stream_chat(messages):
+                if event.kind != "token":
+                    continue
+                if stream is None:
+                    view.body.update("")
+                    stream = Markdown.get_stream(view.body)
+                text += event.text
+                await stream.write(event.text)
+        except HermesError as exc:
+            return None, f"Hermes couldn't write the brief ({exc}) — showing the raw digest."
+        finally:
+            if stream is not None:
+                await stream.stop()
+        return (text, "") if text.strip() else (None, "Hermes sent an empty reply.")
+
+    def _load_brief(self) -> None:
+        view = self.query_one(BriefView)
+        view.set_title(f"Morning brief · {self._day:%A %d %B}")
+        stored = self.db.get_brief(self._day)
+        if stored is None:
+            view.show(BRIEF_EMPTY)
+            at = self.config.brief_time
+            when = f"Written automatically after {at:%H:%M} · " if at else ""
+            view.set_status(f"{when}g to make one now")
+        else:
+            created, markdown, by_hermes = stored
+            view.show(markdown)
+            who = "by Hermes" if by_hermes else "raw digest"
+            view.set_status(f"{who} · {created:%H:%M} · g to regenerate")
+        self._update_brief_banner()
+
+    def _update_brief_banner(self) -> None:
+        if self._briefing:
+            banner = Text("☀ preparing your morning brief…", style=f"italic {MUTED}")
+        elif self._brief_seen != self._day and self.db.get_brief(self._day) is not None:
+            banner = Text.assemble(("☀ Morning brief ready", f"bold {CYAN}"), ("  press 5", MUTED))
+        else:
+            banner = None
+        self.today_view.set_brief_banner(banner)
 
     def action_new_chat(self) -> None:
         if self._agent_busy:

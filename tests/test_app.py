@@ -2,6 +2,8 @@
 
 from datetime import time
 
+import pytest
+
 from terminus.app import TerminusApp
 from terminus.db import Database
 from terminus.models import BlockState
@@ -269,3 +271,55 @@ async def test_agent_unconfigured_shows_setup(config, clock):
         await pilot.press(*"hi", "enter")
         await app.workers.wait_for_complete()
         assert "No Hermes API key" in str(app.query(".agent-error").first().render())
+
+
+# ── morning brief ──
+
+@pytest.fixture
+def fake_gather(monkeypatch):
+    from test_brief import sample_inputs
+    calls = []
+
+    async def gather(**kwargs):
+        calls.append(kwargs)
+        return sample_inputs()
+
+    monkeypatch.setattr("terminus.brief.gather", gather)
+    return calls
+
+
+async def test_brief_auto_generates_with_hermes(config, clock, fake_gather):
+    import dataclasses
+    from datetime import time as dtime
+    from fake_hermes import FakeHermes
+    from terminus.agent_client import HermesClient
+    fake = FakeHermes(reply="## Today\nStart with **Write**.")
+    cfg = dataclasses.replace(config, brief_time=dtime(6))
+    app = TerminusApp(config=cfg, db=Database(":memory:"), clock=clock,
+                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
+    async with app.run_test() as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        created, markdown, by_hermes = app.db.get_brief(clock.now.date())
+        assert by_hermes and "Start with **Write**." in markdown
+        assert "<emails>" in fake.requests[-1]["messages"][1]["content"]
+        assert "Morning brief ready" in str(app.query_one("#today-brief").render())
+        await pilot.press("5")
+        assert app.current_view == "brief"
+        assert not app.query_one("#today-brief").display  # seen → banner gone
+        # only once per day
+        app.maybe_brief()
+        await app.workers.wait_for_complete()
+        assert len(fake_gather) == 1
+
+
+async def test_brief_falls_back_to_raw_digest_without_hermes(config, clock, fake_gather):
+    app = make_app(config, clock)  # no Hermes key, auto-brief off
+    async with app.run_test() as pilot:
+        assert app.db.get_brief(clock.now.date()) is None
+        await pilot.press("5", "g")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        _, markdown, by_hermes = app.db.get_brief(clock.now.date())
+        assert not by_hermes and "Connect Hermes" in markdown and "Interview Tuesday?" in markdown
+        assert "raw digest" in str(app.query_one("#brief-status").render())

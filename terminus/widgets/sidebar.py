@@ -13,7 +13,13 @@ from textual.widgets.option_list import Option
 from terminus.theme import AMBER, CYAN, GREEN, MUTED
 from terminus.widgets.timeline import fmt_duration
 
-VIEWS = [("today", "Today"), ("tasks", "Tasks"), ("stats", "Stats"), ("agent", "AI Agent")]
+VIEWS = [
+    ("today", "Today"),
+    ("tasks", "Tasks"),
+    ("stats", "Stats"),
+    ("agent", "AI Agent"),
+    ("brief", "Brief"),
+]
 
 
 class Sidebar(Vertical):

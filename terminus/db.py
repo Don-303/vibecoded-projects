@@ -78,6 +78,15 @@ MIGRATIONS = [
     ALTER TABLE tasks ADD COLUMN no_due INTEGER NOT NULL DEFAULT 0;
     DELETE FROM sync_state WHERE key = 'sync_token';
     """,
+    # v5: one morning brief per day
+    """
+    CREATE TABLE briefs (
+        day        TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        markdown   TEXT NOT NULL,
+        by_hermes  INTEGER NOT NULL
+    );
+    """,
 ]
 
 
@@ -315,6 +324,24 @@ class Database:
         for s in map(_session, rows):
             worked[s.task_id] += s.elapsed(now)
         return dict(worked)
+
+    # ── morning brief ────────────────────────────────────────────────────
+
+    def get_brief(self, day: date) -> tuple[datetime, str, bool] | None:
+        """(created_at, markdown, written by Hermes?) for a day, if one exists."""
+        row = self.conn.execute(
+            "SELECT created_at, markdown, by_hermes FROM briefs WHERE day = ?", (day.isoformat(),)
+        ).fetchone()
+        return (datetime.fromisoformat(row[0]), row[1], bool(row[2])) if row else None
+
+    def save_brief(self, day: date, markdown: str, by_hermes: bool, now: datetime) -> None:
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO briefs (day, created_at, markdown, by_hermes) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(day) DO UPDATE SET created_at = excluded.created_at,"
+                " markdown = excluded.markdown, by_hermes = excluded.by_hermes",
+                (day.isoformat(), now.isoformat(timespec="seconds"), markdown, int(by_hermes)),
+            )
 
     # ── stats ────────────────────────────────────────────────────────────
 
