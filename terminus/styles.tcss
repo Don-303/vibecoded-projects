@@ -366,3 +366,15 @@ JobDetail {
 #jd-hint {
     margin-top: 1;
 }
+
+#jobs-body {
+    height: 1fr;
+}
+
+#jobs-stats {
+    width: 34;
+    height: 1fr;
+    margin-left: 2;
+    padding: 0 1 0 2;
+    border-left: solid $faint;
+}

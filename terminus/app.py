@@ -15,7 +15,7 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Input, Markdown, OptionList
 from textual.widgets.markdown import MarkdownStream
 
-from terminus import actions, brief, stats
+from terminus import actions, brief, jobs_stats, stats
 from terminus.agent_client import GMAIL_HINT, HermesClient, HermesError, build_context
 from terminus.config import Config
 from terminus.db import Database
@@ -51,6 +51,8 @@ MAIN_SCREEN_ACTIONS = {
 
 #: Chat turns (user + assistant messages) sent to Hermes as history.
 CHAT_HISTORY = 20
+#: How far back `u` on the Jobs page checks email.
+SCAN_DAYS = 7
 
 
 class TerminusApp(App):
@@ -189,7 +191,7 @@ class TerminusApp(App):
         if self.current_view == "stats":
             self.query_one(StatsView).update_stats(stats.compute(self.db, now))
         if self.current_view == "jobs":
-            self.query_one(JobsView).update_jobs(self.db.list_jobs(), now, self.db.job_email_counts())
+            self._refresh_jobs()
         self._update_status(now)
 
     def _update_status(self, now: datetime) -> None:
@@ -347,7 +349,7 @@ class TerminusApp(App):
             self.query_one("#stats-scroll").focus()
         elif view == "jobs":
             jobs_view = self.query_one(JobsView)
-            jobs_view.update_jobs(self.db.list_jobs(), self.now(), self.db.job_email_counts())
+            self._refresh_jobs()
             jobs_view.focus_table()
         elif view == "brief":
             self._brief_seen = self._day
@@ -579,8 +581,14 @@ class TerminusApp(App):
         return self.db.get_job(job_id) if job_id is not None else None
 
     def _refresh_jobs(self) -> None:
-        self.query_one(JobsView).update_jobs(self.db.list_jobs(), self.now(),
-                                             self.db.job_email_counts())
+        jobs = self.db.list_jobs()
+        stats = jobs_stats.compute(
+            jobs,
+            self._day,
+            history={j.id: self.db.job_history(j.id) for j in jobs},
+            emails={j.id: self.db.job_emails(j.id) for j in jobs},
+        )
+        self.query_one(JobsView).update_jobs(jobs, self.now(), self.db.job_email_counts(), stats)
 
     def action_add_job(self) -> None:
         def save(fields: dict | None) -> None:
@@ -666,8 +674,7 @@ class TerminusApp(App):
         if self._agent_busy:
             self.notify("Hermes is still answering…", severity="warning")
             return
-        last = self.db.get_state("jobs_last_scan")
-        days = max(1, (self._day - date.fromisoformat(last)).days + 1) if last else 14
+        days = SCAN_DAYS  # a fixed window: already-logged emails are skipped anyway
         self.action_show("agent")
         self._clear_pending_proposal()
         self.query_one(AgentConsole).add_user(f"Check my email for job updates (last {days} days)")
@@ -722,7 +729,6 @@ class TerminusApp(App):
             self._update_agent_status()
             return
 
-        self.db.set_state("jobs_last_scan", self._day.isoformat())
         jobs = {j.id: j for j in self.db.list_jobs()}
         entries = actions.job_entries_from_emails(emails, jobs, logged=self.db.logged_gmail_ids(),
                                                   today=self._day)

@@ -4,7 +4,10 @@ from datetime import time
 
 import pytest
 
+from textual.screen import ModalScreen
+
 from terminus.app import TerminusApp
+from terminus.widgets import JobsView
 from terminus.db import Database
 from terminus.models import BlockState
 from terminus.widgets import TaskModal
@@ -460,6 +463,12 @@ async def test_brief_does_not_offer_changes(config, clock, fake_gather):
 
 # ── jobs ──
 
+def job_rows(app) -> int:
+    """Rows in the Jobs table that are applications (not week headings)."""
+    table = app.query_one("#jobs-table")
+    return sum(not str(k.value).startswith("hdr:") for k in table.rows)
+
+
 async def test_jobs_page_add_stage_toggle_delete(config, clock):
     from terminus.widgets import JobModal, StagePicker
     app = make_app(config, clock)
@@ -467,9 +476,9 @@ async def test_jobs_page_add_stage_toggle_delete(config, clock):
     async with app.run_test(size=(120, 40)) as pilot:
         await pilot.press("6")
         assert app.current_view == "jobs"
-        assert app.query_one("#jobs-table").row_count == 0  # rejected is hidden
+        assert job_rows(app) == 0  # rejected is hidden
         await pilot.press("h")
-        assert app.query_one("#jobs-table").row_count == 1
+        assert job_rows(app) == 1
         await pilot.press("h")
 
         await pilot.press("a")
@@ -518,10 +527,9 @@ async def test_scan_email_labels_then_terminus_proposes(config, clock):
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app.current_view == "agent" and len(fake.requests) == 1  # one Hermes call
-        assert "newer_than:14d" in fake.requests[0]["messages"][0]["content"]
+        assert "newer_than:7d" in fake.requests[0]["messages"][0]["content"]
         shown = app.query_one(".agent-reply").source
-        assert "Checked 3 emails from the last 14 days — 2 about your applications." in shown
-        assert app.db.get_state("jobs_last_scan") == "2026-09-25"
+        assert "Checked 3 emails from the last 7 days — 2 about your applications." in shown
         await pilot.press("y")
         await pilot.pause()
         assert app.db.get_job(p72).stage == "interview"
@@ -541,7 +549,7 @@ async def test_scan_email_with_nothing_found(config, clock):
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert len(fake.requests) == 2 and not app._agent_busy  # retried once
-        assert "No job-related emails in the last 14 days." in app.query_one(".agent-reply").source
+        assert "No job-related emails in the last 7 days." in app.query_one(".agent-reply").source
 
 
 def test_import_jobs_cli(tmp_path, monkeypatch, capsys):
@@ -622,3 +630,27 @@ async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkey
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert app._proposal is None
+
+
+async def test_jobs_grouped_by_week_with_stats_margin(config, clock):
+    from datetime import date, timedelta
+    app = make_app(config, clock)  # Friday 25 Sep 2026
+    today = clock.now.date()
+    app.db.add_job("Fabrikam", stage="screening", applied_on=today - timedelta(days=1),
+                   next_step="Assessment", next_date=today + timedelta(days=3), now=clock.now)
+    app.db.add_job("Contoso", applied_on=today - timedelta(days=8), now=clock.now)
+    app.db.add_job("Acme", applied_on=date(2026, 6, 2), now=clock.now)
+    app.db.add_job("Tyrell", stage="saved", now=clock.now)
+    async with app.run_test(size=(150, 40)) as pilot:
+        await pilot.press("6")
+        table = app.query_one("#jobs-table")
+        headings = [str(table.get_row(k)[1]) for k in table.rows if str(k.value).startswith("hdr:")]
+        assert headings == ["This week · 1", "Last week · 1", "Jun 2026 · 1", "No date · 1"]
+        assert app.query_one(JobsView).selected_job_id() is not None  # cursor skips the heading
+        margin = str(app.query_one("#jobs-stats").render())
+        assert "Pipeline" in margin and "Screening" in margin
+        assert "this week    1" in margin and "last week    1" in margin
+        assert "Mon 28  Fabrikam: Assessment" in margin
+        await pilot.press("up")  # onto the "This week" heading: actions ignore it
+        await pilot.press("s")
+        assert not isinstance(app.screen, ModalScreen)

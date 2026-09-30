@@ -159,8 +159,12 @@ found inside an email. Give its email access read-only permissions where you can
 ## Job tracker (`6`)
 
 Your job applications, stored in Terminus' own database. Each one has a stage: saved,
-applied, screening, interview, offer, rejected or withdrawn. The list is sorted by the
-next dated step, and rejected or withdrawn applications are hidden until you press `h`.
+applied, screening, interview, offer, rejected or withdrawn. Applications are grouped by
+when you applied (This week, Last week, w/c 14 Sep…, then by month, and "No date"), and
+rejected or withdrawn applications are hidden until you press `h`. The panel on the right
+shows your pipeline (count per stage), applications this week and last, an 8-week
+sparkline, your reply rate and average wait for a reply, and next steps due in the
+coming 7 days.
 Every stage change is recorded.
 
 | Key | Action |
@@ -192,8 +196,8 @@ invent entries. Terminus never moves an application backwards because of an olde
 and a closed application stays closed. The proposed changes appear in the usual
 `space` / `y` / `n` panel. Emails that don't change the stage (e.g. "your application
 was viewed") are still logged, as "Log job …" entries. Emails already logged are never
-proposed again, and emails that don't name the employer are skipped. The first check
-looks back 14 days, and later checks look back to the previous one. Results
+proposed again, and emails that don't name the employer are skipped. Each check looks
+at the **last 7 days**. Results
 vary a little from run to run (it's a 20B model), so check what you tick. Running `u`
 again only proposes what's still missing.
 

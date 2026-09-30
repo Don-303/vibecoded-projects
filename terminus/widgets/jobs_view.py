@@ -14,8 +14,9 @@ from textual.widgets import Button, DataTable, Input, Label, OptionList, Select,
 from textual.widgets.option_list import Option
 
 from terminus.actions import parse_day
+from terminus.jobs_stats import JobStats, group_jobs, sparkline
 from terminus.models import STAGES, Job, JobEmail
-from terminus.theme import AMBER, BLUE, CYAN, FG, GREEN, MUTED, RED
+from terminus.theme import AMBER, BLUE, CYAN, FAINT, FG, GREEN, MUTED, RED
 
 STAGE_STYLE = {
     "saved": MUTED,
@@ -38,8 +39,43 @@ def ago(then: datetime | None, now: datetime) -> str:
     return "today" if days <= 0 else "yesterday" if days == 1 else f"{days}d ago"
 
 
-def sort_key(job: Job):
-    return (job.closed, job.next_date or date.max, STAGE_RANK[job.stage], job.company.lower())
+HEADER = "hdr:"  # row-key prefix for the week headings in the table
+
+
+def render_stats(stats: JobStats | None, today: date) -> Text:
+    """The margin panel on the Jobs page."""
+    text = Text()
+    if stats is None:
+        return text
+    text.append("Pipeline\n", style="bold")
+    for stage in STAGES:
+        n = stats.by_stage.get(stage, 0)
+        if n or stage in ("applied", "interview", "offer"):
+            text.append(f"  {stage.capitalize():<11}", style=STAGE_STYLE[stage])
+            text.append(f"{n:>3}\n", style="" if n else MUTED)
+    text.append("\nApplied\n", style="bold")
+    text.append("  this week  ", style=MUTED)
+    text.append(f"{stats.applied_this_week:>3}\n", style=CYAN if stats.applied_this_week else MUTED)
+    text.append("  last week  ", style=MUTED)
+    text.append(f"{stats.applied_last_week:>3}\n")
+    text.append(f"  {sparkline(stats.weekly)}", style=GREEN)
+    text.append("  8 wks\n", style=FAINT)
+    text.append("\nReplies\n", style="bold")
+    rate = stats.response_rate
+    text.append("  rate       ", style=MUTED)
+    text.append(f"{rate:>4.0%}\n" if rate is not None else "   —\n")
+    text.append(f"  ({stats.responded} of {stats.submitted} heard back)\n", style=FAINT)
+    text.append("  avg wait   ", style=MUTED)
+    text.append(f"{stats.avg_days_to_reply:>3.0f}d\n" if stats.avg_days_to_reply is not None
+                else "   —\n")
+    text.append("\nComing up\n", style="bold")
+    if not stats.due:
+        text.append("  nothing in the next 7 days\n", style=MUTED)
+    for when, what in stats.due[:6]:
+        style = RED if when < today else AMBER if when == today else CYAN
+        text.append(f"  {when:%a %d}  ", style=style)
+        text.append(what[:20] + ("…" if len(what) > 20 else "") + "\n", style=FG)
+    return text
 
 
 class JobsView(Vertical):
@@ -61,57 +97,83 @@ class JobsView(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static(id="jobs-title", classes="view-title")
-        table = DataTable(id="jobs-table", cursor_type="row")
-        table.add_column("Stage", key="stage", width=10)
-        table.add_column("Company", key="company", width=16)
-        table.add_column("Role", key="role", width=18)
-        table.add_column("Status", key="status", width=26)
-        table.add_column("✉", key="emails", width=3)
-        table.add_column("Next step", key="next", width=22)
-        table.add_column("Applied", key="applied", width=7)
-        yield table
+        with Horizontal(id="jobs-body"):
+            yield from self._compose_table()
+            yield Static(id="jobs-stats")
         yield Static(
             Text("u asks Hermes to check your email for job updates · "
                  "import a sheet: terminus import-jobs tracker.csv", style=MUTED),
             id="jobs-hint",
         )
 
+    def _compose_table(self) -> ComposeResult:
+        table = DataTable(id="jobs-table", cursor_type="row")
+        table.add_column("Stage", key="stage", width=10)
+        table.add_column("Company", key="company", width=16)
+        table.add_column("Role", key="role", width=18)
+        table.add_column("Status", key="status", width=24)
+        table.add_column("✉", key="emails", width=3)
+        table.add_column("Next step", key="next", width=20)
+        # (no Applied column: the week headings show it, and enter shows the exact date)
+        yield table
+
     def update_jobs(self, jobs: list[Job], now: datetime,
-                    email_counts: dict[int, int] | None = None) -> None:
+                    email_counts: dict[int, int] | None = None,
+                    stats: JobStats | None = None) -> None:
         self._jobs = jobs
         if email_counts is not None:
             self._email_counts = email_counts
+        if stats is not None:
+            self._stats = stats
         counts = getattr(self, "_email_counts", {})
         table = self.query_one(DataTable)
         keep = self.selected_job_id()
         table.clear()
         today = now.date()
-        shown = sorted((j for j in jobs if self.show_closed or not j.closed), key=sort_key)
-        for j in shown:
-            dim = MUTED if j.closed else ""
-            nxt = Text()
-            if j.next_date:
-                style = RED if j.next_date < today else AMBER if j.next_date == today else CYAN
-                if j.closed:
-                    style = MUTED
-                nxt.append(f"{j.next_date:%a %d %b} ", style=style)
-            nxt.append(j.next_step or ("" if j.next_date else "—"), style=dim or MUTED)
-            n = counts.get(j.id, 0)
+        shown = [j for j in jobs if self.show_closed or not j.closed]
+        first_job_row = None
+        for label, members in group_jobs(shown, today):
             table.add_row(
-                Text(j.stage.capitalize(), style=STAGE_STYLE[j.stage]),
-                Text(j.company, style=dim or "bold", overflow="ellipsis", no_wrap=True),
-                Text(j.role, style=dim, overflow="ellipsis", no_wrap=True),
-                Text(j.status or "", style=dim or FG, overflow="ellipsis", no_wrap=True),
-                Text(str(n) if n else "", style=CYAN if n and not j.closed else MUTED),
-                nxt,
-                Text(f"{j.applied_on:%d %b}" if j.applied_on else "", style=MUTED),
-                key=str(j.id),
+                Text("━" * 10, style=FAINT),
+                Text(f"{label} · {len(members)}", style=f"bold {CYAN}", no_wrap=True),
+                *(Text("") for _ in range(4)),
+                key=f"{HEADER}{label}",
             )
+            first_job_row = first_job_row if first_job_row is not None else table.row_count
+            for j in members:
+                self._add_job_row(table, j, today, counts)
         if keep is not None:
             try:
                 table.move_cursor(row=table.get_row_index(str(keep)), animate=False)
             except Exception:
-                pass
+                keep = None
+        if keep is None and first_job_row is not None:
+            table.move_cursor(row=first_job_row, animate=False)  # skip the first heading
+        self.query_one("#jobs-stats", Static).update(
+            render_stats(getattr(self, "_stats", None), today))
+        self._update_title(jobs)
+
+    def _add_job_row(self, table: DataTable, j: Job, today: date, counts: dict[int, int]) -> None:
+        dim = MUTED if j.closed else ""
+        nxt = Text()
+        if j.next_date:
+            style = RED if j.next_date < today else AMBER if j.next_date == today else CYAN
+            if j.closed:
+                style = MUTED
+            nxt.append(f"{j.next_date:%a %d %b} ", style=style)
+        nxt.append(j.next_step or ("" if j.next_date else "—"), style=dim or MUTED)
+        n = counts.get(j.id, 0)
+        table.add_row(
+            Text(j.stage.capitalize(), style=STAGE_STYLE[j.stage]),
+            Text(j.company, style=dim or "bold", overflow="ellipsis", no_wrap=True),
+            Text(j.role, style=dim, overflow="ellipsis", no_wrap=True),
+            Text(j.status or "", style=dim or FG, overflow="ellipsis", no_wrap=True),
+            Text(str(n) if n else "", style=CYAN if n and not j.closed else MUTED),
+            nxt,
+            key=str(j.id),
+        )
+
+    def _update_title(self, jobs: list[Job]) -> None:
         active = sum(not j.closed for j in jobs)
         closed = len(jobs) - active
         title = Text.assemble(("Jobs", "bold"), (f"   {active} active", MUTED))
@@ -125,6 +187,8 @@ class JobsView(Vertical):
         if table.row_count == 0:
             return None
         row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        if row_key.value.startswith(HEADER):
+            return None  # a week heading, not an application
         return int(row_key.value)
 
     @on(DataTable.RowSelected, "#jobs-table")
