@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from terminus.jobs_import import map_stage
 from terminus.models import STAGES, Job, Task
@@ -135,6 +135,23 @@ def extract(text: str) -> tuple[str, list | None, str | None]:
     return prose, data, None
 
 
+GMAIL_ID = re.compile(r"^[0-9a-f]{12,20}$")
+
+
+def gmail_id_date(gmail_id: str) -> date | None:
+    """When Gmail received a message, decoded from its id (ms timestamp in the high bits).
+
+    Used instead of the date the model reports, which it can get wrong.
+    """
+    if not GMAIL_ID.match(gmail_id or ""):
+        return None
+    try:
+        stamp = datetime.fromtimestamp((int(gmail_id, 16) >> 20) / 1000)
+    except (OverflowError, OSError, ValueError):
+        return None
+    return stamp.date() if 2004 <= stamp.year <= 2100 else None  # Gmail launched in 2004
+
+
 def parse_email_list(text: str) -> list[dict]:
     """The JSON array of emails Hermes returns in step 1 of a job scan.
 
@@ -153,6 +170,8 @@ def parse_email_list(text: str) -> list[dict]:
         e["id"] = str(e.get("id") or "").strip()
         for key in ("from", "subject", "date", "summary"):
             e[key] = " ".join(str(e.get(key) or "").split())[:300]  # one line each
+        if real := gmail_id_date(e["id"]):
+            e["date"] = real.isoformat()
     return emails
 
 

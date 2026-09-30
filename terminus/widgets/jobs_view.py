@@ -14,7 +14,7 @@ from textual.widgets import Button, DataTable, Input, Label, OptionList, Select,
 from textual.widgets.option_list import Option
 
 from terminus.actions import parse_day
-from terminus.jobs_stats import JobStats, group_jobs, sparkline
+from terminus.jobs_stats import JobStats, day_label, group_jobs, sparkline
 from terminus.models import STAGES, Job, JobEmail
 from terminus.theme import AMBER, BLUE, CYAN, FAINT, FG, GREEN, MUTED, RED
 
@@ -39,7 +39,7 @@ def ago(then: datetime | None, now: datetime) -> str:
     return "today" if days <= 0 else "yesterday" if days == 1 else f"{days}d ago"
 
 
-HEADER = "hdr:"  # row-key prefix for the week headings in the table
+HEADER = "hdr:"  # row-key prefix for the date headings in the table
 
 
 def render_stats(stats: JobStats | None, today: date) -> Text:
@@ -114,7 +114,7 @@ class JobsView(Vertical):
         table.add_column("Status", key="status", width=24)
         table.add_column("✉", key="emails", width=3)
         table.add_column("Next step", key="next", width=20)
-        # (no Applied column: the week headings show it, and enter shows the exact date)
+        # (no Applied column: the date headings show it)
         yield table
 
     def update_jobs(self, jobs: list[Job], now: datetime,
@@ -132,12 +132,15 @@ class JobsView(Vertical):
         today = now.date()
         shown = [j for j in jobs if self.show_closed or not j.closed]
         first_job_row = None
-        for label, members in group_jobs(shown, today):
+        for day, members in group_jobs(shown):
+            when = f"{day:%a %d %b}" if day else "No date"
+            extra = " · ".join(filter(None, [day_label(day, today) if day else "",
+                                             str(len(members))]))
             table.add_row(
-                Text("━" * 10, style=FAINT),
-                Text(f"{label} · {len(members)}", style=f"bold {CYAN}", no_wrap=True),
-                *(Text("") for _ in range(4)),
-                key=f"{HEADER}{label}",
+                Text(when, style=f"bold {CYAN}", no_wrap=True),
+                Text(extra, style=MUTED, no_wrap=True),
+                *(Text("─" * w, style=FAINT) for w in (18, 24, 3, 20)),
+                key=f"{HEADER}{day or 'none'}",
             )
             first_job_row = first_job_row if first_job_row is not None else table.row_count
             for j in members:

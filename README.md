@@ -159,8 +159,8 @@ found inside an email. Give its email access read-only permissions where you can
 ## Job tracker (`6`)
 
 Your job applications, stored in Terminus' own database. Each one has a stage: saved,
-applied, screening, interview, offer, rejected or withdrawn. Applications are grouped by
-when you applied (This week, Last week, w/c 14 Sep…, then by month, and "No date"), and
+applied, screening, interview, offer, rejected or withdrawn. Each day you applied gets a
+heading row ("Wed 30 Sep  today · 9"), newest first, with undated ones last, and
 rejected or withdrawn applications are hidden until you press `h`. The panel on the right
 shows your pipeline (count per stage), applications this week and last, an 8-week
 sparkline, your reply rate and average wait for a reply, and next steps due in the

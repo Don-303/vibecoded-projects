@@ -18,34 +18,34 @@ def week_start(d: date) -> date:
     return d - timedelta(days=d.weekday())  # Monday
 
 
-def group_label(applied: date | None, today: date) -> str:
-    if applied is None:
-        return "No date"
-    this_week = week_start(today)
-    start = week_start(applied)
-    if start >= this_week:
-        return "This week"
-    if start == this_week - timedelta(weeks=1):
-        return "Last week"
-    if start > this_week - timedelta(weeks=WEEKS):
-        return f"w/c {start:%d %b}"
-    return f"{applied:%b %Y}"
+def group_jobs(jobs: list[Job]) -> list[tuple[date | None, list[Job]]]:
+    """Jobs grouped by the day they were applied for: newest day first, undated last.
 
-
-def group_jobs(jobs: list[Job], today: date) -> list[tuple[str, list[Job]]]:
-    """Jobs grouped by when they were applied for: newest group first, "No date" last.
-
-    Within a group, open applications come before closed ones, newest first.
+    Within a day, open applications come before closed ones.
     """
-    ordered = sorted(jobs, key=lambda j: (j.applied_on is None, -(j.applied_on or date.min).toordinal()))
-    groups: dict[str, list[Job]] = {}
-    for job in ordered:
-        groups.setdefault(group_label(job.applied_on, today), []).append(job)
-    return [
-        (label, sorted(members, key=lambda j: (j.closed, -(j.applied_on or date.min).toordinal(),
-                                                j.company.lower())))
-        for label, members in groups.items()
-    ]
+    groups: dict[date | None, list[Job]] = {}
+    for job in jobs:
+        groups.setdefault(job.applied_on, []).append(job)
+    days = sorted((d for d in groups if d is not None), reverse=True)
+    if None in groups:
+        days.append(None)
+    return [(d, sorted(groups[d], key=lambda j: (j.closed, j.company.lower()))) for d in days]
+
+
+def day_label(day: date | None, today: date) -> str:
+    """The small label next to a day heading: Today / Yesterday / 3 days ago / …"""
+    if day is None:
+        return "no date"
+    ago = (today - day).days
+    if ago == 0:
+        return "today"
+    if ago == 1:
+        return "yesterday"
+    if 1 < ago < 7:
+        return f"{ago} days ago"
+    if day.year != today.year:
+        return str(day.year)
+    return ""
 
 
 @dataclass

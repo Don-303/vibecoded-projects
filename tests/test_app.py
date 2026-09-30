@@ -632,7 +632,7 @@ async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkey
         assert app._proposal is None
 
 
-async def test_jobs_grouped_by_week_with_stats_margin(config, clock):
+async def test_jobs_split_by_day_with_stats_margin(config, clock):
     from datetime import date, timedelta
     app = make_app(config, clock)  # Friday 25 Sep 2026
     today = clock.now.date()
@@ -644,8 +644,12 @@ async def test_jobs_grouped_by_week_with_stats_margin(config, clock):
     async with app.run_test(size=(150, 40)) as pilot:
         await pilot.press("6")
         table = app.query_one("#jobs-table")
-        headings = [str(table.get_row(k)[1]) for k in table.rows if str(k.value).startswith("hdr:")]
-        assert headings == ["This week · 1", "Last week · 1", "Jun 2026 · 1", "No date · 1"]
+        headings = [f"{table.get_row(k)[0]} | {table.get_row(k)[1]}"
+                    for k in table.rows if str(k.value).startswith("hdr:")]
+        assert headings == ["Thu 24 Sep | yesterday · 1",
+                            "Thu 17 Sep | 1",
+                            "Tue 02 Jun | 1",
+                            "No date | 1"]
         assert app.query_one(JobsView).selected_job_id() is not None  # cursor skips the heading
         margin = str(app.query_one("#jobs-stats").render())
         assert "Pipeline" in margin and "Screening" in margin

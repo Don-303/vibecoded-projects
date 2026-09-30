@@ -236,3 +236,11 @@ def test_validate_job_emails_and_log_only_updates():
         "Log job “Umbrella” · +1 email",
     ]
     assert p.changes[1].job_fields == {} and p.changes[1].emails[0]["id"] == "h"
+
+
+def test_email_dates_come_from_gmail_ids():
+    from terminus.actions import gmail_id_date, parse_email_list
+    assert gmail_id_date("1a0d8ba30a200001") == date(2026, 9, 25)  # INITECH update, 25 Sep 13:21 UTC
+    assert gmail_id_date("m-1") is None and gmail_id_date("") is None
+    listed = parse_email_list('[{"id": "1a0d4bb881c61918", "subject": "Thanks", "date": "2026-09-30"}]')
+    assert listed[0]["date"] == "2026-09-24"  # the model said the 30th; the id says the 24th

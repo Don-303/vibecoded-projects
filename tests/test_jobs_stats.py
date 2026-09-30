@@ -1,26 +1,27 @@
 from datetime import date, datetime
 
-from terminus.jobs_stats import compute, group_jobs, group_label, sparkline
+from terminus.jobs_stats import compute, day_label, group_jobs, sparkline
 from terminus.models import Job, JobEmail
 
 TODAY = date(2026, 9, 30)  # Wednesday
 
 
-def test_group_labels():
-    assert group_label(date(2026, 9, 28), TODAY) == "This week"  # Monday
-    assert group_label(date(2026, 9, 27), TODAY) == "Last week"  # Sunday before
-    assert group_label(date(2026, 9, 14), TODAY) == "w/c 14 Sep"
-    assert group_label(date(2026, 7, 1), TODAY) == "Jul 2026"
-    assert group_label(None, TODAY) == "No date"
-
-
-def test_group_jobs_orders_groups_and_members():
+def test_group_jobs_by_day():
     jobs = [Job(1, "Old", applied_on=date(2026, 7, 1)), Job(2, "Saved", stage="saved"),
             Job(3, "B", applied_on=date(2026, 9, 29)), Job(4, "Gone", stage="rejected",
-            applied_on=date(2026, 9, 30)), Job(5, "A", applied_on=date(2026, 9, 29))]
-    groups = group_jobs(jobs, TODAY)
-    assert [label for label, _ in groups] == ["This week", "Jul 2026", "No date"]
-    assert [j.company for j in groups[0][1]] == ["A", "B", "Gone"]  # open first, closed last
+            applied_on=date(2026, 9, 29)), Job(5, "A", applied_on=date(2026, 9, 29)),
+            Job(6, "C", applied_on=date(2026, 9, 30))]
+    groups = group_jobs(jobs)
+    assert [d for d, _ in groups] == [date(2026, 9, 30), date(2026, 9, 29), date(2026, 7, 1), None]
+    assert [j.company for j in groups[1][1]] == ["A", "B", "Gone"]  # open first, closed last
+
+
+def test_day_labels():
+    assert day_label(date(2026, 9, 30), TODAY) == "today"
+    assert day_label(date(2026, 9, 29), TODAY) == "yesterday"
+    assert day_label(date(2026, 9, 26), TODAY) == "4 days ago"
+    assert day_label(date(2026, 9, 1), TODAY) == ""
+    assert day_label(date(2025, 12, 1), TODAY) == "2025"
 
 
 def test_compute_stats():
