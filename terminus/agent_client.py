@@ -232,6 +232,8 @@ def build_context(
         lines += ["", "Job applications (active):"]
         for j in active_jobs:
             bits = [j.stage]
+            if j.status:
+                bits.append(f"status: {j.status}")
             if j.applied_on:
                 bits.append(f"applied {j.applied_on:%d %b}")
             if j.next_step or j.next_date:

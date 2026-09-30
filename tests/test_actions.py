@@ -173,23 +173,66 @@ def test_job_entries_from_emails():
     from terminus.actions import job_entries_from_emails
     from terminus.models import Job
     known = {3: Job(3, "Northwind", "Quant Research Intern", "interview"),
-             4: Job(4, "INITECH", "", "rejected")}
+             4: Job(4, "INITECH", "", "rejected"),
+             5: Job(5, "Umbrella", "", "applied")}
     emails = [
-        {"id": "a", "date": "2026-09-20", "company": "Acme", "role": "", "stage": "saved"},
-        {"id": "b", "date": "2026-09-22", "company": "acme", "role": "Analyst", "stage": "applied"},
+        {"id": "a", "date": "2026-09-20", "company": "Acme", "role": "", "stage": "saved",
+         "subject": "Finish your application", "summary": "Reminder to finish"},
+        {"id": "b", "date": "2026-09-22", "company": "acme", "role": "Analyst", "stage": "applied",
+         "subject": "Thanks for applying", "summary": "Application received"},
         {"id": "c", "date": "2026-09-21", "company": "Northwind", "role": "Quant Research Intern",
-         "stage": "applied"},  # older news: don't move interview back to applied
-        {"id": "d", "date": "2026-09-24", "company": "Northwind", "role": "", "stage": "rejected"},
+         "stage": "applied", "summary": "Old confirmation"},  # older news: stage stays interview
+        {"id": "d", "date": "2026-09-24", "company": "Northwind", "role": "", "stage": "rejected",
+         "summary": "Not progressing"},
         {"id": "e", "date": "2026-09-23", "company": "INITECH", "stage": "interview"},  # closed: leave
         {"id": "f", "date": "2026-09-25", "company": "beBee", "stage": "none"},
         {"id": "g", "date": "2026-09-25", "company": "", "stage": "applied"},
-        {"id": "h", "date": "2026-09-25", "company": "Contoso", "role": "HR Application",
-         "stage": "applied"},
+        {"id": "h", "date": "2026-09-25", "company": "Umbrella", "stage": "applied",
+         "subject": "Your application was viewed", "summary": "Application viewed"},
+        {"id": "old", "date": "2026-09-19", "company": "Umbrella", "stage": "applied"},  # logged
+        {"id": "u", "date": "2026-09-25", "company": "Unknown", "stage": "applied"},  # unnamed
     ]
-    assert job_entries_from_emails(emails, known) == [
-        {"op": "job_add", "company": "Acme", "stage": "applied", "email_ref": "a",
-         "role": "Analyst"},
-        {"op": "job_update", "job": 3, "stage": "rejected"},
-        {"op": "job_add", "company": "Contoso", "stage": "applied", "email_ref": "h",
-         "applied_on": "2026-09-25"},
+    out = job_entries_from_emails(emails, known, logged={"old"}, today=DAY)
+    acme, p72, city = out
+    assert acme["op"] == "job_add" and acme["company"] == "Acme" and acme["role"] == "Analyst"
+    assert acme["stage"] == "applied" and acme["status"] == "Application received"
+    assert [m["id"] for m in acme["emails"]] == ["a", "b"]
+    assert p72 == {"op": "job_update", "job": 3, "stage": "rejected", "status": "Not progressing",
+                   "emails": [p72["emails"][0], p72["emails"][1]]}
+    assert [m["id"] for m in p72["emails"]] == ["c", "d"]
+    assert city["job"] == 5 and "stage" not in city and city["status"] == "Application viewed"
+    assert [m["id"] for m in city["emails"]] == ["h"]
+
+
+def test_assessment_email_tracks_job_and_proposes_task():
+    from terminus.actions import job_entries_from_emails
+    emails = [{"id": "z1", "date": "2026-09-26", "company": "Fabrikam", "role": "Graduate Analyst",
+               "stage": "screening", "subject": "Online assessment: Graduate Analyst",
+               "summary": "Online assessment invite", "due": "2026-10-03"}]
+    job, task = job_entries_from_emails(emails, {}, today=DAY)
+    assert job["op"] == "job_add" and job["stage"] == "screening"
+    assert job["next_step"] == "Complete assessment" and job["next_date"] == "2026-10-03"
+    assert task == {"op": "add", "title": "Fabrikam Graduate Analyst assessment", "day": "2026-10-03",
+                    "estimate": 2, "tags": ["job"]}
+    # a deadline that has passed: still tracked, but no task
+    emails[0]["due"] = "2026-09-01"
+    assert [e["op"] for e in job_entries_from_emails(emails, {}, today=DAY)] == ["job_add"]
+    # a screening phone call isn't an assessment task
+    call = [{"id": "z2", "date": "2026-09-26", "company": "Contoso", "stage": "screening",
+             "subject": "Quick chat", "summary": "Recruiter phone call"}]
+    assert [e["op"] for e in job_entries_from_emails(call, {}, today=DAY)] == ["job_add"]
+
+
+def test_validate_job_emails_and_log_only_updates():
+    from terminus.models import Job
+    jobs = {5: Job(5, "Umbrella", "", "applied")}
+    mail = [{"id": "h", "date": "2026-09-25", "from": "LinkedIn", "subject": "Viewed",
+             "summary": "Application viewed", "stage": "applied"}]
+    p = validate([{"op": "job_update", "job": 5, "emails": mail, "status": "Application viewed"},
+                  {"op": "job_update", "job": 5, "emails": mail}],
+                 {}, today=DAY, now_time=NOW, jobs=jobs)
+    assert [c.summary for c in p.changes] == [
+        "Update job “Umbrella” · status: Application viewed · +1 email",
+        "Log job “Umbrella” · +1 email",
     ]
+    assert p.changes[1].job_fields == {} and p.changes[1].emails[0]["id"] == "h"

@@ -137,3 +137,23 @@ def test_jobs_crud_and_history(db):
         db.add_job("Other", email_ref="msg-1", now=now)
     db.delete_job(j)
     assert db.get_job(j) is None and db.job_history(j) == []
+
+
+def test_job_emails_and_status(db):
+    j = db.add_job("Fabrikam", role="Graduate Analyst", status="Application received", now=at(9))
+    emails = [
+        {"id": "g1", "date": "2026-09-24", "from": "Fabrikam", "subject": "Thanks for applying",
+         "summary": "Application received", "stage": "applied"},
+        {"id": "g2", "date": "2026-09-26", "from": "Fabrikam", "subject": "Online assessment",
+         "summary": "Assessment invite, due 3 Oct", "stage": "screening"},
+    ]
+    assert db.add_job_emails(j, emails, at(10)) == 2
+    assert db.add_job_emails(j, emails[:1], at(11)) == 0  # already linked
+    listed = db.job_emails(j)
+    assert [e.gmail_id for e in listed] == ["g2", "g1"]  # newest first
+    assert listed[0].gmail_url == "https://mail.google.com/mail/u/0/#all/g2"
+    assert db.job_email_counts() == {j: 2}
+    assert db.logged_gmail_ids() == {"g1", "g2"}
+    assert db.get_job(j).status == "Application received"
+    db.delete_job(j)
+    assert db.job_email_counts() == {}

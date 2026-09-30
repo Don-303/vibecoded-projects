@@ -111,6 +111,7 @@ def import_csv(db: Database, path: Path, *, now: datetime, dry_run: bool = False
                 "next_date": parse_date(get("next_date")),
                 "link": get("link"),
                 "notes": get("notes"),
+                "status": get("stage"),  # the sheet's own wording, e.g. "Interview 2 booked"
             }
             if not dry_run:
                 db.add_job(company, now=now, **fields)

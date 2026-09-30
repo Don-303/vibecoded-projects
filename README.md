@@ -165,15 +165,28 @@ Every stage change is recorded.
 
 | Key | Action |
 |---|---|
-| `a` / `e` or `enter` | Add / edit an application (company, role, stage, dates, next step, link, notes) |
+| `enter` | **Details**: fields, stage history and the linked emails (`o` opens one in Gmail) |
+| `a` / `e` | Add / edit an application (company, role, stage, status, dates, next step, link, notes) |
 | `s` | Change the stage |
 | `o` | Open the link in your browser |
 | `h` | Show or hide closed applications |
 | `d d` | Delete |
 | `u` | **Check email with Hermes** |
 
+**Status and email history:** each application has a free-text **status** saying what's
+happening now (e.g. "Online assessment invitation"), separate from its stage. Every
+email that Hermes matches to an application is logged with its date, sender, subject and
+Hermes' one-line summary. The ✉ column shows how many emails each application has, and
+`enter` lists them. Terminus stores only Hermes' description; the email itself stays in
+Gmail, and `o` opens it there.
+
+**Assessments:** online tests, HireVue, Codility and HackerRank, SHL, reasoning tests,
+game-based tests and assessment centres. An assessment email adds the application at
+**Screening** even if its confirmation email was never seen. A deadline in the email
+becomes the next step, and Terminus also proposes a two-pomodoro task to complete it.
+
 **`u` (check email):** Hermes searches your Gmail with its own read-only tools and labels
-each email (company, role, stage, or "not my application"). Terminus then works out the
+each email (company, role, stage, summary, deadline, or "not my application"). Terminus then works out the
 changes against your tracker, in plain code, so the model can't invent entries. Terminus
 never moves an application backwards because of an older email, and a closed application
 stays closed. The proposed changes appear in the usual `space` / `y` / `n` panel. The

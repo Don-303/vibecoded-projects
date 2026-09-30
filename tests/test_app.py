@@ -556,3 +556,69 @@ def test_import_jobs_cli(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Added 1:" in out and "Northwind — Quant Intern · interview" in out
     assert Database(tmp_path / "t.db").find_job("Northwind").stage == "interview"
+
+
+async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkeypatch):
+    import json
+    from fake_hermes import FakeHermes
+    from terminus.agent_client import HermesClient
+    from terminus.widgets import JobDetail
+    opened = []
+    monkeypatch.setattr("webbrowser.open", opened.append)
+    db = Database(":memory:")
+    city = db.add_job("Umbrella", now=clock.now)
+    labelled = json.dumps([
+        {"id": "z1", "from": "Fabrikam", "subject": "Online assessment: Graduate Analyst",
+         "date": "2026-09-25", "company": "Fabrikam", "role": "Graduate Analyst", "stage": "screening",
+         "summary": "Online assessment invite", "next_step": "", "due": "2026-10-03"},
+        {"id": "c1", "from": "LinkedIn", "subject": "Your application was viewed",
+         "date": "2026-09-24", "company": "Umbrella", "role": "", "stage": "applied",
+         "summary": "Application viewed by Umbrella HR"},
+    ])
+    fake = FakeHermes(replies=[labelled])
+    fake.tool_events = False
+    app = TerminusApp(config=config, db=db, clock=clock,
+                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
+    async with app.run_test(size=(130, 50)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.press("6", "u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        summaries = [c.summary for c in app._proposal.proposal.changes]
+        assert summaries == [
+            "Track job “Fabrikam — Graduate Analyst” · Screening · next: Sat 03 Oct Complete assessment"
+            " · status: Online assessment invite · +1 email",
+            "Update job “Umbrella” · status: Application viewed by Umbrella HR · +1 email",
+            "Add “Fabrikam Graduate Analyst assessment” · Sat 03 Oct ~2 #job",
+        ]
+        await pilot.press("y")
+        await pilot.pause()
+        fabrikam = app.db.find_job("Fabrikam")
+        assert fabrikam.stage == "screening" and fabrikam.status == "Online assessment invite"
+        assert str(fabrikam.next_date) == "2026-10-03"
+        assert [e.gmail_id for e in app.db.job_emails(fabrikam.id)] == ["z1"]
+        assert app.db.job_emails(city)[0].summary == "Application viewed by Umbrella HR"
+        from datetime import date
+        task = app.db.tasks_for_day(date(2026, 10, 3))[0]  # 8 days out: beyond "upcoming"
+        assert (task.title, str(task.day), task.estimate) == ("Fabrikam Graduate Analyst assessment",
+                                                             "2026-10-03", 2)
+
+        # details: enter on the Fabrikam row, then o opens its email in Gmail
+        app.action_show("jobs")  # (after y the chat input has focus, so "6" would be typed)
+        await pilot.pause()
+        view = app.query_one("#jobs-table")
+        view.move_cursor(row=view.get_row_index(str(fabrikam.id)))
+        await pilot.press("enter")
+        assert isinstance(app.screen, JobDetail)
+        assert "Online assessment invite" in str(app.screen.query_one("#jd-emails").get_option_at_index(0).prompt)
+        await pilot.press("o")
+        assert opened == ["https://mail.google.com/mail/u/0/#all/z1"]
+        await pilot.press("escape")
+        assert not isinstance(app.screen, JobDetail)
+
+        # a second scan of the same emails proposes nothing new
+        fake.replies = [labelled]
+        await pilot.press("u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app._proposal is None

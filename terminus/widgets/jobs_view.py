@@ -14,7 +14,7 @@ from textual.widgets import Button, DataTable, Input, Label, OptionList, Select,
 from textual.widgets.option_list import Option
 
 from terminus.actions import parse_day
-from terminus.models import STAGES, Job
+from terminus.models import STAGES, Job, JobEmail
 from terminus.theme import AMBER, BLUE, CYAN, FG, GREEN, MUTED, RED
 
 STAGE_STYLE = {
@@ -46,6 +46,7 @@ class JobsView(Vertical):
     BINDINGS = [
         Binding("a", "app.add_job", "Add"),
         Binding("e", "app.edit_job", "Edit"),
+        Binding("enter", "app.job_details", "Details", show=False),
         Binding("s", "app.stage_job", "Stage"),
         Binding("o", "app.open_job_link", "Open link"),
         Binding("h", "toggle_closed", "Show closed"),
@@ -62,11 +63,12 @@ class JobsView(Vertical):
         yield Static(id="jobs-title", classes="view-title")
         table = DataTable(id="jobs-table", cursor_type="row")
         table.add_column("Stage", key="stage", width=10)
-        table.add_column("Company", key="company", width=20)
-        table.add_column("Role", key="role", width=28)
-        table.add_column("Applied", key="applied", width=8)
-        table.add_column("Next step", key="next")
-        table.add_column("Updated", key="updated", width=10)
+        table.add_column("Company", key="company", width=16)
+        table.add_column("Role", key="role", width=18)
+        table.add_column("Status", key="status", width=26)
+        table.add_column("✉", key="emails", width=3)
+        table.add_column("Next step", key="next", width=22)
+        table.add_column("Applied", key="applied", width=7)
         yield table
         yield Static(
             Text("u asks Hermes to check your email for job updates · "
@@ -74,8 +76,12 @@ class JobsView(Vertical):
             id="jobs-hint",
         )
 
-    def update_jobs(self, jobs: list[Job], now: datetime) -> None:
+    def update_jobs(self, jobs: list[Job], now: datetime,
+                    email_counts: dict[int, int] | None = None) -> None:
         self._jobs = jobs
+        if email_counts is not None:
+            self._email_counts = email_counts
+        counts = getattr(self, "_email_counts", {})
         table = self.query_one(DataTable)
         keep = self.selected_job_id()
         table.clear()
@@ -90,13 +96,15 @@ class JobsView(Vertical):
                     style = MUTED
                 nxt.append(f"{j.next_date:%a %d %b} ", style=style)
             nxt.append(j.next_step or ("" if j.next_date else "—"), style=dim or MUTED)
+            n = counts.get(j.id, 0)
             table.add_row(
                 Text(j.stage.capitalize(), style=STAGE_STYLE[j.stage]),
                 Text(j.company, style=dim or "bold", overflow="ellipsis", no_wrap=True),
                 Text(j.role, style=dim, overflow="ellipsis", no_wrap=True),
-                Text(f"{j.applied_on:%d %b}" if j.applied_on else "", style=MUTED),
+                Text(j.status or "", style=dim or FG, overflow="ellipsis", no_wrap=True),
+                Text(str(n) if n else "", style=CYAN if n and not j.closed else MUTED),
                 nxt,
-                Text(ago(j.updated_at, now), style=MUTED),
+                Text(f"{j.applied_on:%d %b}" if j.applied_on else "", style=MUTED),
                 key=str(j.id),
             )
         if keep is not None:
@@ -120,8 +128,8 @@ class JobsView(Vertical):
         return int(row_key.value)
 
     @on(DataTable.RowSelected, "#jobs-table")
-    def _row_selected(self) -> None:  # enter on a row
-        self.app.run_action("app.edit_job")
+    def _row_selected(self) -> None:  # enter (or click) on a row
+        self.app.action_job_details()
 
     def action_toggle_closed(self) -> None:
         self.show_closed = not self.show_closed
@@ -170,6 +178,9 @@ class JobModal(ModalScreen[dict | None]):
                     yield Label("Next date")
                     yield Input(j.next_date.isoformat() if j and j.next_date else "",
                                 placeholder="tomorrow / friday / 2026-09-30", id="j-next-date")
+            yield Label("Status")
+            yield Input(j.status if j else "", placeholder="What's happening now, e.g. "
+                        "Online assessment due Fri", id="j-status")
             yield Label("Link")
             yield Input(j.link if j else "", placeholder="https://…", id="j-link")
             yield Label("Notes")
@@ -212,6 +223,7 @@ class JobModal(ModalScreen[dict | None]):
             "next_date": next_date,
             "link": link,
             "notes": self._value("j-notes"),
+            "status": self._value("j-status"),
         })
 
     @on(Button.Pressed, "#j-cancel")
@@ -247,4 +259,103 @@ class StagePicker(ModalScreen[str | None]):
         self.dismiss(event.option.id)
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class JobDetail(ModalScreen[str | None]):
+    """One application: its fields, stage history and linked emails.
+
+    Returns "edit" if the user asked to edit it, else None.
+    """
+
+    BINDINGS = [
+        Binding("escape,q", "close", "Close"),
+        Binding("o", "open_email", "Open email in Gmail"),
+        Binding("l", "open_link", "Open job link"),
+        Binding("e", "edit", "Edit"),
+    ]
+
+    def __init__(self, job: Job, history: list[tuple[str, datetime]],
+                 emails: list[JobEmail]) -> None:
+        super().__init__()
+        self.job = job
+        self.history = history
+        self.emails = emails
+
+    def compose(self) -> ComposeResult:
+        j = self.job
+        head = Text()
+        head.append(j.company, style="bold")
+        if j.role:
+            head.append(f" — {j.role}")
+        head.append(f"   {j.stage.capitalize()}", style=STAGE_STYLE[j.stage])
+        info = Text()
+        rows = [
+            ("Status", j.status or "—"),
+            ("Next step", " ".join(filter(None, [f"{j.next_date:%a %d %b}" if j.next_date else "",
+                                                 j.next_step])) or "—"),
+            ("Applied", f"{j.applied_on:%d %b %Y}" if j.applied_on else "—"),
+            ("Link", j.link or "—"),
+            ("Notes", j.notes or "—"),
+        ]
+        for label, value in rows:
+            info.append(f"{label:<10}", style=MUTED)
+            info.append(f"{value}\n")
+        history = Text("History   ", style=MUTED)
+        history.append("  →  ".join(f"{s.capitalize()} {at:%d %b}" for s, at in self.history) or "—")
+        with Vertical(id="job-detail"):
+            yield Static(head, classes="view-title")
+            yield Static(info)
+            yield Static(history, id="jd-history")
+            yield Static(Text.assemble((f"Emails ({len(self.emails)})", "bold"),
+                                       ("   o opens the highlighted one in Gmail", MUTED)),
+                         id="jd-emails-title")
+            if self.emails:
+                yield OptionList(*(Option(self._email_line(m), id=str(i))
+                                   for i, m in enumerate(self.emails)), id="jd-emails")
+            else:
+                yield Static(Text("No linked emails yet — u on the Jobs page checks your inbox.",
+                                  style=MUTED))
+            yield Static(Text("e edit · l job link · esc close", style=MUTED), id="jd-hint")
+
+    @staticmethod
+    def _email_line(m: JobEmail) -> Text:
+        line = Text()
+        line.append(f"{m.sent_on:%d %b}  " if m.sent_on else "        ", style=MUTED)
+        if m.stage:
+            line.append(f"{m.stage:<10}", style=STAGE_STYLE.get(m.stage, MUTED))
+        line.append(m.subject or "(no subject)", style="bold")
+        sender = m.sender.split("<")[0].strip().strip('"') or m.sender
+        if sender:
+            line.append(f"  · {sender}", style=MUTED)
+        if m.summary and m.summary != m.subject:
+            line.append(f"\n              {m.summary}", style=MUTED)
+        return line
+
+    def on_mount(self) -> None:
+        if self.emails:
+            self.query_one("#jd-emails", OptionList).focus()
+
+    @on(OptionList.OptionSelected, "#jd-emails")
+    def _selected(self) -> None:
+        self.action_open_email()
+
+    def action_open_email(self) -> None:
+        if not self.emails:
+            return
+        index = self.query_one("#jd-emails", OptionList).highlighted or 0
+        import webbrowser
+        webbrowser.open(self.emails[index].gmail_url)
+
+    def action_open_link(self) -> None:
+        if self.job.link:
+            import webbrowser
+            webbrowser.open(self.job.link)
+        else:
+            self.notify("No link saved for this application.")
+
+    def action_edit(self) -> None:
+        self.dismiss("edit")
+
+    def action_close(self) -> None:
         self.dismiss(None)

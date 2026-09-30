@@ -27,6 +27,7 @@ from terminus.todoist import TodoistError, TodoistSync
 from terminus.widgets import (
     AgentConsole,
     BriefView,
+    JobDetail,
     JobModal,
     JobsView,
     StagePicker,
@@ -44,7 +45,7 @@ from terminus.widgets.timeline import fmt_duration
 MAIN_SCREEN_ACTIONS = {
     "show", "new_task", "toggle_done", "toggle_focus", "agent",
     "edit_task", "delete_task", "move_task", "quit", "sync", "do_today", "new_chat",
-    "make_brief", "add_job", "edit_job", "stage_job", "open_job_link", "delete_job",
+    "make_brief", "add_job", "edit_job", "stage_job", "open_job_link", "delete_job", "job_details",
     "scan_job_email",
 }  # fmt: skip
 
@@ -188,7 +189,7 @@ class TerminusApp(App):
         if self.current_view == "stats":
             self.query_one(StatsView).update_stats(stats.compute(self.db, now))
         if self.current_view == "jobs":
-            self.query_one(JobsView).update_jobs(self.db.list_jobs(), now)
+            self.query_one(JobsView).update_jobs(self.db.list_jobs(), now, self.db.job_email_counts())
         self._update_status(now)
 
     def _update_status(self, now: datetime) -> None:
@@ -346,7 +347,7 @@ class TerminusApp(App):
             self.query_one("#stats-scroll").focus()
         elif view == "jobs":
             jobs_view = self.query_one(JobsView)
-            jobs_view.update_jobs(self.db.list_jobs(), self.now())
+            jobs_view.update_jobs(self.db.list_jobs(), self.now(), self.db.job_email_counts())
             jobs_view.focus_table()
         elif view == "brief":
             self._brief_seen = self._day
@@ -523,12 +524,15 @@ class TerminusApp(App):
         now = self.now()
         if c.op == "job_add":
             fields = dict(c.job_fields)
-            self.db.add_job(fields.pop("company"), now=now, **fields)
+            job_id = self.db.add_job(fields.pop("company"), now=now, **fields)
+            self.db.add_job_emails(job_id, c.emails, now)
             return
         if c.op == "job_update":
             if self.db.get_job(c.job_id) is None:
                 raise LookupError("application no longer exists")
-            self.db.update_job(c.job_id, now=now, **c.job_fields)
+            if c.job_fields:
+                self.db.update_job(c.job_id, now=now, **c.job_fields)
+            self.db.add_job_emails(c.job_id, c.emails, now)
             return
         if c.op == "add":
             task_id = self.db.add_task(c.title, c.day, estimate=c.estimate, tags=c.tags,
@@ -575,7 +579,8 @@ class TerminusApp(App):
         return self.db.get_job(job_id) if job_id is not None else None
 
     def _refresh_jobs(self) -> None:
-        self.query_one(JobsView).update_jobs(self.db.list_jobs(), self.now())
+        self.query_one(JobsView).update_jobs(self.db.list_jobs(), self.now(),
+                                             self.db.job_email_counts())
 
     def action_add_job(self) -> None:
         def save(fields: dict | None) -> None:
@@ -596,6 +601,18 @@ class TerminusApp(App):
                 self._refresh_jobs()
 
         self.push_screen(JobModal(job, today=self._day), save)
+
+    def action_job_details(self) -> None:
+        job = self._selected_job()
+        if job is None:
+            return
+
+        def closed(result: str | None) -> None:
+            if result == "edit":
+                self.action_edit_job()
+
+        self.push_screen(JobDetail(job, self.db.job_history(job.id), self.db.job_emails(job.id)),
+                         closed)
 
     def action_stage_job(self) -> None:
         job = self._selected_job()
@@ -662,21 +679,28 @@ class TerminusApp(App):
         self._update_agent_status()
         activity = console.add_activity("⚙ Hermes is searching your Gmail…")
         query = (f"newer_than:{days}d (application OR applying OR applied OR interview OR "
-                 "assessment OR offer OR candidate OR recruiter OR hiring) "
-                 "-category:promotions -category:social")
+                 "assessment OR test OR hirevue OR codility OR hackerrank OR offer OR "
+                 "candidate OR recruiter OR hiring) -category:promotions -category:social")
         prompt = (
             f"{GMAIL_HINT} Run search_emails with the query `{query}` (up to 40 results). "
             "Reply with ONLY a JSON array, one object per email, no prose: "
             '[{"id": "<gmail message id>", "from": "<sender name>", "subject": "…", '
             '"date": "YYYY-MM-DD", "company": "<employer the application is with>", '
             '"role": "<position, or empty if not named>", "stage": "<stage>", '
-            '"summary": "<one line>"}]. '
+            '"summary": "<one line: what this email says, e.g. Online assessment invite>", '
+            '"next_step": "<what I must do next, or empty>", '
+            '"due": "<YYYY-MM-DD deadline or date in the email, or empty>"}]. '
             'stage is "none" unless the email is about one of MY OWN applications '
             "(job alerts, newsletters, marketing, courses = none). Otherwise: application "
-            'sent / received / thanks for applying = "applied"; reminder to finish an '
-            'application = "saved"; test, assessment or screening call = "screening"; '
+            'sent / received / viewed / thanks for applying = "applied"; reminder to finish an '
+            'application = "saved"; ANY assessment = "screening" (online assessment or test, '
+            "HireVue or video interview, Codility / HackerRank / CodeSignal coding test, SHL, "
+            "numerical / verbal / logical reasoning, situational judgement, game-based "
+            "(Pymetrics, Arctic Shores), case study, assessment centre, phone screen); "
             'interview invite = "interview"; offer = "offer"; unfortunately / not progressing '
-            '= "rejected". Base every field only on that email. Use [] if nothing matches.'
+            '= "rejected". Always include assessment emails, even if you never saw the '
+            "application itself. Base every field only on that email; never invent dates. "
+            "Use [] if nothing matches."
         )
         try:
             for attempt in (1, 2):  # the model occasionally answers [] without looking
@@ -700,8 +724,11 @@ class TerminusApp(App):
 
         self.db.set_state("jobs_last_scan", self._day.isoformat())
         jobs = {j.id: j for j in self.db.list_jobs()}
-        entries = actions.job_entries_from_emails(emails, jobs)
+        entries = actions.job_entries_from_emails(emails, jobs, logged=self.db.logged_gmail_ids(),
+                                                  today=self._day)
         mine = [e for e in emails if str(e.get("stage", "none")).lower() not in ("", "none")]
+        unnamed = [e for e in mine if actions.PLACEHOLDER.match(str(e.get("company") or ""))
+                   or not str(e.get("company") or "").strip()]
         if not emails:
             summary = [f"No job-related emails in the last {days} days."]
         else:
@@ -709,6 +736,9 @@ class TerminusApp(App):
                        f"{len(mine)} about your applications."]
         summary += [f"- **{e.get('company') or e.get('from')}** · {e.get('stage')} · "
                     f"{e.get('subject')}" for e in mine]
+        if unnamed:
+            summary.append(f"\n{len(unnamed)} skipped because the email doesn't name the "
+                           "employer — add those with a on the Jobs page if they matter.")
         if mine and not entries:
             summary.append("\nYour tracker is already up to date.")
         activity.remove()

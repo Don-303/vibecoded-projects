@@ -337,3 +337,32 @@ JobModal, StagePicker {
     background: $surface;
     border: none;
 }
+
+JobDetail {
+    align: center middle;
+    background: $background 60%;
+}
+
+#job-detail {
+    width: 96;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#jd-history, #jd-emails-title {
+    margin-top: 1;
+}
+
+#jd-emails {
+    height: auto;
+    max-height: 16;
+    background: $surface;
+    border: none;
+}
+
+#jd-hint {
+    margin-top: 1;
+}

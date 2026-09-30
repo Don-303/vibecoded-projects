@@ -110,6 +110,7 @@ class Job:
     link: str = ""
     email_ref: str | None = None  # Gmail message id, so email updates aren't added twice
     notes: str = ""
+    status: str = ""  # free text: what's happening now ("Online assessment due Fri")
     updated_at: datetime | None = None
 
     @property
@@ -119,3 +120,19 @@ class Job:
     @property
     def label(self) -> str:
         return f"{self.company} — {self.role}" if self.role else self.company
+
+
+@dataclass
+class JobEmail:
+    """What Hermes reported about one email linked to an application (never the email itself)."""
+
+    gmail_id: str
+    sent_on: date | None
+    sender: str
+    subject: str
+    summary: str
+    stage: str  # the stage this email pointed to
+
+    @property
+    def gmail_url(self) -> str:
+        return f"https://mail.google.com/mail/u/0/#all/{self.gmail_id}"

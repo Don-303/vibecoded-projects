@@ -29,7 +29,7 @@ from terminus.quickadd import parse_time
 FENCE = "```terminus-actions"
 BLOCK_RE = re.compile(r"```terminus-actions\s*\n(.*?)(?:```|\Z)", re.S)
 OPS = ("add", "done", "schedule", "edit", "delete", "job_add", "job_update")
-JOB_TEXT = ("role", "next_step", "link", "notes")
+JOB_TEXT = ("role", "next_step", "link", "notes", "status")
 MAX_ESTIMATE = 12
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
@@ -77,6 +77,7 @@ class Change:
     tags: list[str] | None = None
     job_id: int | None = None
     job_fields: dict = field(default_factory=dict)  # job_add / job_update columns
+    emails: list[dict] = field(default_factory=list)  # emails to link to the application
 
 
 @dataclass
@@ -159,58 +160,108 @@ def parse_email_list(text: str) -> list[dict]:
 PROGRESS = {"saved": 0, "applied": 1, "screening": 2, "interview": 3, "offer": 4}
 
 
-def job_entries_from_emails(emails: list[dict], jobs: dict[int, Job]) -> list[dict]:
-    """Turn Hermes' labelled email list into job_add / job_update entries.
+ASSESSMENT = re.compile(
+    r"assessment|online test|\btest\b|hirevue|codility|hackerrank|codesignal|pymetrics|"
+    r"\bshl\b|numerical|verbal reasoning|situational judg|game.based|case study|"
+    r"video interview|coding challenge|technical exercise", re.I)
+
+
+def _email_record(e: dict, stage: str) -> dict:
+    return {k: e.get(k, "") for k in ("id", "date", "from", "subject", "summary")} | {"stage": stage}
+
+
+def job_entries_from_emails(
+    emails: list[dict],
+    jobs: dict[int, Job],
+    *,
+    logged: set[str] = frozenset(),
+    today: date | None = None,
+) -> list[dict]:
+    """Turn Hermes' labelled email list into job_add / job_update (+ task) entries.
 
     Deterministic on purpose: the model only labels each email (company, role,
-    stage); matching against the tracker happens here, so it can't invent entries.
-    Emails are handled oldest first, so the newest word on an application wins.
+    stage, summary, due); matching against the tracker happens here, so it can't
+    invent entries. Emails are handled oldest first, so the newest word on an
+    application sets its status. Every new email is attached to its application;
+    emails in ``logged`` were handled by an earlier scan and are skipped. An
+    assessment email also proposes a task to do it.
     """
-    entries: list[dict] = []
-    pending: dict[tuple[str, str], dict] = {}  # this batch's job_add entries by (company, role)
+    today = today or date.today()
+    updates: dict[int, dict] = {}  # job id → job_update entry
+    adds: list[dict] = []
+    tasks: list[dict] = []
     state = {j.id: j.stage for j in jobs.values()}
 
     for e in sorted(emails, key=lambda e: e.get("date") or ""):
         raw_stage = str(e.get("stage") or "").strip().lower()
         company = str(e.get("company") or "").strip()
-        if not company or raw_stage in ("", "none", "null", "n/a", "not_application", "ignore"):
+        ref = e.get("id") or None
+        if (not company or PLACEHOLDER.match(company)
+                or raw_stage in ("", "none", "null", "n/a", "not_application", "ignore")):
+            continue  # not about an application, or the employer isn't named
+        if ref and ref in logged:
             continue
         stage = _stage(raw_stage)
         role = str(e.get("role") or "").strip()
         if PLACEHOLDER.match(role) or "application" in role.lower():
             role = ""  # "Application", "HR Application"… describe the email, not a position
-        ref = e.get("id") or None
+        summary = str(e.get("summary") or "").strip()
+        try:
+            due = date.fromisoformat(str(e.get("due") or "")[:10])
+        except ValueError:
+            due = None
+        text = f"{e.get('subject', '')} {summary}"
+        is_assessment = stage == "screening" and bool(ASSESSMENT.search(text))
+        next_step = str(e.get("next_step") or "").strip()
+        if PLACEHOLDER.match(next_step):
+            next_step = ""
+        if is_assessment and not next_step:
+            next_step = "Complete assessment"
 
         job = next((j for j in jobs.values() if ref and j.email_ref == ref), None) or next(
             (j for j in jobs.values() if j.company.lower() == company.lower()
              and (not role or not j.role or j.role.lower() == role.lower())), None)
         if job is not None:
-            current = state[job.id]
-            if job.closed or current == stage:
+            if job.closed:
                 continue
-            if stage in PROGRESS and PROGRESS.get(stage, 0) <= PROGRESS.get(current, 0):
-                continue  # an older-news email; don't move the application backwards
-            state[job.id] = stage
-            entries = [x for x in entries if x.get("job") != job.id]  # newest update wins
-            entries.append({"op": "job_update", "job": job.id, "stage": stage})
-            continue
+            entry = updates.setdefault(job.id, {"op": "job_update", "job": job.id, "emails": []})
+            entry["emails"].append(_email_record(e, stage))
+            if summary:
+                entry["status"] = summary
+            current = state[job.id]
+            moves_on = stage not in PROGRESS or PROGRESS[stage] > PROGRESS.get(current, 0)
+            if stage != current and moves_on:
+                state[job.id] = stage
+                entry["stage"] = stage
+            target = entry
+        else:
+            key = (company.lower(), role.lower())
+            target = next((a for a in adds if a["company"].lower() == key[0] and (
+                not a.get("role") or not key[1] or a["role"].lower() == key[1])), None)
+            if target is None:
+                target = {"op": "job_add", "company": company, "stage": stage,
+                          "email_ref": ref, "emails": []}
+                if stage != "saved" and e.get("date"):
+                    target["applied_on"] = e["date"]
+                adds.append(target)
+            elif stage not in PROGRESS or PROGRESS[stage] > PROGRESS.get(target["stage"], 0):
+                target["stage"] = stage
+            if role and not target.get("role"):
+                target["role"] = role
+            target["emails"].append(_email_record(e, stage))
+            if summary:
+                target["status"] = summary
 
-        key = (company.lower(), role.lower())
-        existing = pending.get(key) or next(
-            (v for (c, r), v in pending.items() if c == key[0] and (not r or not key[1])), None)
-        if existing is not None:  # another email about an application found in this batch
-            if stage not in PROGRESS or PROGRESS[stage] > PROGRESS.get(existing["stage"], 0):
-                existing["stage"] = stage
-            existing["role"] = existing.get("role") or role
-            continue
-        entry = {"op": "job_add", "company": company, "stage": stage, "email_ref": ref}
-        if role:
-            entry["role"] = role
-        if stage != "saved" and e.get("date"):
-            entry["applied_on"] = e["date"]
-        pending[key] = entry
-        entries.append(entry)
-    return entries
+        if next_step or due:
+            target["next_step"] = next_step
+            if due:
+                target["next_date"] = due.isoformat()
+        if is_assessment and (due is None or due >= today):
+            label = f"{company} {role}".strip() if role else company
+            tasks.append({"op": "add", "title": f"{label} assessment",
+                          "day": (due or today).isoformat(), "estimate": 2, "tags": ["job"]})
+
+    return adds + list(updates.values()) + tasks
 
 
 def parse_day(value, today: date) -> date:
@@ -374,6 +425,12 @@ def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
     for key in ("applied_on", "next_date"):
         if key in entry:
             fields[key] = _job_date(entry[key], today)
+    emails = [
+        {k: " ".join(str(m.get(k) or "").split())[:300]
+         for k in ("id", "date", "from", "subject", "summary", "stage")}
+        for m in entry.get("emails") or [] if isinstance(m, dict) and m.get("id")
+    ]
+    mail_note = f" · +{len(emails)} email{'s' if len(emails) != 1 else ''}" if emails else ""
 
     def describe(f: dict) -> str:
         bits = []
@@ -399,24 +456,29 @@ def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
             fields.setdefault("applied_on", today)
         fields["email_ref"] = ref
         label = f"{company} — {fields['role']}" if fields.get("role") else company
-        extra = " · ".join(filter(None, [fields["stage"].capitalize(), describe(fields)]))
-        return Change("job_add", f"Track job “{label}” · {extra}",
-                      job_fields={"company": company, **fields})
+        extra = " · ".join(filter(None, [fields["stage"].capitalize(), describe(fields),
+                                         f"status: {fields['status']}" if fields.get("status") else ""]))
+        return Change("job_add", f"Track job “{label}” · {extra}{mail_note}",
+                      job_fields={"company": company, **fields}, emails=emails)
 
     try:
         job = jobs[int(entry["job"])]
     except (KeyError, ValueError, TypeError):
         raise ValueError(f"no job [J#{entry.get('job')}]") from None
     changed = {k: v for k, v in fields.items() if getattr(job, k) != v}
-    if not changed:
+    if not changed and not emails:
         raise ValueError(f"nothing to change on {job.label}")
     diffs = []
     if "stage" in changed:
         diffs.append(f"{job.stage.capitalize()} → {changed['stage'].capitalize()}")
     if next_bits := describe(changed):
         diffs.append(next_bits)
-    others = sorted(set(changed) - {"stage", "next_step", "next_date"})
+    if "status" in changed:
+        diffs.append(f"status: {changed['status']}")
+    others = sorted(set(changed) - {"stage", "next_step", "next_date", "status"})
     if others:
         diffs.append("edits " + ", ".join(k.replace("_", " ") for k in others))
-    return Change("job_update", f"Update job “{job.label}” · {' · '.join(diffs)}",
-                  job_id=job.id, job_fields=changed)
+    verb = "Update" if changed else "Log"
+    detail = " · ".join(diffs) if diffs else ""
+    summary = f"{verb} job “{job.label}”" + (f" · {detail}" if detail else "") + mail_note
+    return Change("job_update", summary, job_id=job.id, job_fields=changed, emails=emails)

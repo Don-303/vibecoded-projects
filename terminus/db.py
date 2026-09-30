@@ -11,7 +11,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from terminus.models import STAGES, Job, Session, Task
+from terminus.models import STAGES, Job, JobEmail, Session, Task
 
 MIGRATIONS = [
     # v1
@@ -111,6 +111,23 @@ MIGRATIONS = [
         at     TEXT NOT NULL
     );
     """,
+    # v7: a free-text status per application, and the emails linked to it
+    #     (Hermes' description of each email — Terminus never reads mail itself)
+    """
+    ALTER TABLE jobs ADD COLUMN status TEXT NOT NULL DEFAULT '';
+    CREATE TABLE job_emails (
+        id       INTEGER PRIMARY KEY,
+        job_id   INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        gmail_id TEXT NOT NULL,
+        sent_on  TEXT,
+        sender   TEXT NOT NULL DEFAULT '',
+        subject  TEXT NOT NULL DEFAULT '',
+        summary  TEXT NOT NULL DEFAULT '',
+        stage    TEXT NOT NULL DEFAULT '',
+        added_at TEXT NOT NULL,
+        UNIQUE (job_id, gmail_id)
+    );
+    """,
 ]
 
 
@@ -143,12 +160,13 @@ def _job(row: sqlite3.Row) -> Job:
         link=row["link"],
         email_ref=row["email_ref"],
         notes=row["notes"],
+        status=row["status"],
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
 
 
 JOB_FIELDS = ("company", "role", "stage", "applied_on", "next_step", "next_date", "link",
-              "email_ref", "notes")
+              "email_ref", "notes", "status")
 
 
 def _job_value(field: str, value):
@@ -465,6 +483,45 @@ class Database:
     def job_by_email_ref(self, ref: str) -> Job | None:
         row = self.conn.execute("SELECT * FROM jobs WHERE email_ref = ?", (ref,)).fetchone()
         return _job(row) if row else None
+
+    def add_job_emails(self, job_id: int, emails: list[dict], now: datetime) -> int:
+        """Link emails (as described by Hermes) to an application. Duplicates are ignored."""
+        added = 0
+        with self.conn:
+            for e in emails:
+                if not e.get("id"):
+                    continue
+                cur = self.conn.execute(
+                    "INSERT OR IGNORE INTO job_emails"
+                    " (job_id, gmail_id, sent_on, sender, subject, summary, stage, added_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (job_id, e["id"], e.get("date") or None, e.get("from", ""),
+                     e.get("subject", ""), e.get("summary", ""), e.get("stage", ""),
+                     now.isoformat(timespec="seconds")),
+                )
+                added += cur.rowcount
+        return added
+
+    def job_emails(self, job_id: int) -> list[JobEmail]:
+        rows = self.conn.execute(
+            "SELECT * FROM job_emails WHERE job_id = ? ORDER BY sent_on DESC, id DESC", (job_id,)
+        )
+        return [
+            JobEmail(r["gmail_id"], date.fromisoformat(r["sent_on"]) if r["sent_on"] else None,
+                     r["sender"], r["subject"], r["summary"], r["stage"])
+            for r in rows
+        ]
+
+    def job_email_counts(self) -> dict[int, int]:
+        rows = self.conn.execute("SELECT job_id, COUNT(*) FROM job_emails GROUP BY job_id")
+        return dict(rows.fetchall())
+
+    def logged_gmail_ids(self) -> set[str]:
+        """Every email already linked to an application (or used to create one)."""
+        ids = {r[0] for r in self.conn.execute("SELECT gmail_id FROM job_emails")}
+        ids |= {r[0] for r in self.conn.execute(
+            "SELECT email_ref FROM jobs WHERE email_ref IS NOT NULL")}
+        return ids
 
     def job_history(self, job_id: int) -> list[tuple[str, datetime]]:
         rows = self.conn.execute(
