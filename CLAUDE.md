@@ -49,7 +49,11 @@ Terminus: a Textual TUI day planner and focus timer. User-facing docs are in REA
   email scan (`TerminusApp._scan_jobs`) is ONE Hermes call that returns labelled email
   JSON (`actions.parse_email_list`). `actions.job_entries_from_emails` then matches it to
   the tracker **deterministically**: gpt-oss:20b invented tracker entries when asked to do
-  the matching itself, so keep that step in code.
+  the matching itself, so keep that step in code. Matched emails are stored in
+  `job_emails` (v7), holding Hermes' description only; `logged_gmail_ids()` stops
+  re-proposals. Assessment emails (the `ASSESSMENT` regex) also propose a task.
+- `pyproject.toml` turns RuntimeWarning into a test failure. An un-awaited `app.run_action`
+  in a widget once silently broke `enter` on the Jobs page.
 - `terminus/stats.py` computes the numbers and `widgets/stats_view.py` renders them. Stats
   are recomputed only while the Stats view is visible.
 - Sessions: `task_id` NULL means free focus. `ON DELETE SET NULL` keeps logged time when a

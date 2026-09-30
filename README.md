@@ -186,11 +186,14 @@ game-based tests and assessment centres. An assessment email adds the applicatio
 becomes the next step, and Terminus also proposes a two-pomodoro task to complete it.
 
 **`u` (check email):** Hermes searches your Gmail with its own read-only tools and labels
-each email (company, role, stage, summary, deadline, or "not my application"). Terminus then works out the
-changes against your tracker, in plain code, so the model can't invent entries. Terminus
-never moves an application backwards because of an older email, and a closed application
-stays closed. The proposed changes appear in the usual `space` / `y` / `n` panel. The
-first check looks back 14 days, and later checks look back to the previous one. Results
+each email (company, role, stage, summary, deadline, or "not my application"). Terminus
+then works out the changes against your tracker, in plain code, so the model can't
+invent entries. Terminus never moves an application backwards because of an older email,
+and a closed application stays closed. The proposed changes appear in the usual
+`space` / `y` / `n` panel. Emails that don't change the stage (e.g. "your application
+was viewed") are still logged, as "Log job …" entries. Emails already logged are never
+proposed again, and emails that don't name the employer are skipped. The first check
+looks back 14 days, and later checks look back to the previous one. Results
 vary a little from run to run (it's a 20B model), so check what you tick. Running `u`
 again only proposes what's still missing.
 
