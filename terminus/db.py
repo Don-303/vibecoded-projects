@@ -288,6 +288,10 @@ class Database:
         )
         return [_task(r) for r in rows]
 
+    def open_task_titles(self) -> list[str]:
+        """Titles of every unfinished task, any day."""
+        return [r[0] for r in self.conn.execute("SELECT title FROM tasks WHERE status = 'todo'")]
+
     def upcoming_tasks(self, after: date, days: int = 7) -> list[Task]:
         """Unfinished tasks on the ``days`` days after ``after``, by day and time."""
         rows = self.conn.execute(

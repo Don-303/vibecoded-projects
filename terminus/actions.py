@@ -230,12 +230,39 @@ def recent_emails(emails: list[dict], since: date) -> tuple[list[dict], int]:
     return kept, len(emails) - len(kept)
 
 
+def _match_job(jobs: dict[int, Job], ref: str | None, company: str, role: str,
+               stage: str) -> Job | None:
+    """The tracked application an email is about, or None for a new application.
+
+    Several applications at one company: an exact role match wins; otherwise prefer
+    an open one at the email's stage, then the most recently updated. If only
+    closed ones match, a fresh application (anything but a rejection/withdrawal)
+    is a new row, and a rejection is old news for the closed one.
+    """
+    if ref and (by_ref := next((j for j in jobs.values() if j.email_ref == ref), None)):
+        return by_ref
+    same = [j for j in jobs.values() if j.company.lower() == company.lower()]
+    if role and (exact := [j for j in same if j.role and j.role.lower() == role.lower()]):
+        return min(exact, key=lambda j: j.closed)  # open first
+    fits = [j for j in same if not role or not j.role]
+    open_ = [j for j in fits if not j.closed]
+    if open_:
+        return max(open_, key=lambda j: (j.stage == stage, j.updated_at or datetime.min))
+    if fits and stage in CLOSED:
+        return fits[0]  # the caller skips closed applications
+    return None
+
+
+CLOSED = {"rejected", "withdrawn"}
+
+
 def job_entries_from_emails(
     emails: list[dict],
     jobs: dict[int, Job],
     *,
     logged: set[str] = frozenset(),
     today: date | None = None,
+    open_tasks: list[str] = (),
 ) -> list[dict]:
     """Turn Hermes' labelled email list into job_add / job_update (+ task) entries.
 
@@ -278,9 +305,7 @@ def job_entries_from_emails(
         if is_assessment and not next_step:
             next_step = "Complete assessment"
 
-        job = next((j for j in jobs.values() if ref and j.email_ref == ref), None) or next(
-            (j for j in jobs.values() if j.company.lower() == company.lower()
-             and (not role or not j.role or j.role.lower() == role.lower())), None)
+        job = _match_job(jobs, ref, company, role, stage)
         if job is not None:
             if job.closed:
                 continue
@@ -316,7 +341,9 @@ def job_entries_from_emails(
             target["next_step"] = next_step
             if due:
                 target["next_date"] = due.isoformat()
-        if is_assessment and (due is None or due >= today):
+        already = [t for t in list(open_tasks) + [x["title"] for x in tasks]
+                   if company.lower() in t.lower() and "assessment" in t.lower()]
+        if is_assessment and not already and (due is None or due >= today):
             label = f"{company} {role}".strip() if role else company
             tasks.append({"op": "add", "title": f"{label} assessment",
                           "day": (due or today).isoformat(), "estimate": 2, "tags": ["job"]})
@@ -408,6 +435,10 @@ def _one(entry, tasks: dict[int, Task], today: date, now_time: time) -> Change:
         title = str(entry.get("title") or "").strip()
         if not title:
             raise ValueError("needs a title")
+        dup = next((t for t in tasks.values() if not t.done and
+                    " ".join(t.title.lower().split()) == " ".join(title.lower().split())), None)
+        if dup is not None:
+            raise ValueError(f"“{title}” is already on your list as [#{dup.id}]")
         day, at, _ = when(require=False, default_day=today)
         day = day or today
         est = _estimate(entry["estimate"]) if entry.get("estimate") is not None else 1
@@ -468,7 +499,7 @@ def _job_date(value, today: date) -> date | None:
 
 #: Filler the model sometimes writes instead of leaving a field out.
 PLACEHOLDER = re.compile(r"^\W*(unknown|n/?a|none|tbc|tbd|not (specified|stated|given)|"
-                         r"position unknown|role unknown|unspecified|-+)\W*$", re.I)
+                         r"position unknown|role unknown|unspecified|-+)?\W*$", re.I)  # "?" too
 
 
 def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:

@@ -184,7 +184,7 @@ def test_job_entries_from_emails():
          "stage": "applied", "summary": "Old confirmation"},  # older news: stage stays interview
         {"id": "d", "date": "2026-09-24", "company": "Northwind", "role": "", "stage": "rejected",
          "summary": "Not progressing"},
-        {"id": "e", "date": "2026-09-23", "company": "INITECH", "stage": "interview"},  # closed: leave
+        {"id": "e", "date": "2026-09-23", "company": "INITECH", "stage": "interview"},  # closed → new
         {"id": "f", "date": "2026-09-25", "company": "beBee", "stage": "none"},
         {"id": "g", "date": "2026-09-25", "company": "", "stage": "applied"},
         {"id": "h", "date": "2026-09-25", "company": "Umbrella", "stage": "applied",
@@ -193,7 +193,9 @@ def test_job_entries_from_emails():
         {"id": "u", "date": "2026-09-25", "company": "Unknown", "stage": "applied"},  # unnamed
     ]
     out = job_entries_from_emails(emails, known, logged={"old"}, today=DAY)
-    acme, p72, city = out
+    acme, initech_new, p72, city = out
+    # INITECH's only application is closed, so an interview email is a new application
+    assert initech_new["op"] == "job_add" and initech_new["company"] == "INITECH"
     assert acme["op"] == "job_add" and acme["company"] == "Acme" and acme["role"] == "Analyst"
     assert acme["stage"] == "applied" and acme["status"] == "Application received"
     assert [m["id"] for m in acme["emails"]] == ["a", "b"]
@@ -281,3 +283,43 @@ def test_fabricated_ids_are_dropped():
     kept, dropped = recent_emails([{"id": "1a0d112233445566"}, {"id": "1a0d900123456789"}],
                                   since=date(2026, 9, 1))
     assert kept == [] and dropped == 2
+
+
+def test_matching_with_unknown_roles_and_several_applications():
+    from datetime import datetime as dt
+    from terminus.actions import job_entries_from_emails
+    from terminus.models import Job
+    known = {7: Job(7, "Globex", "Wealth Management", "screening", updated_at=dt(2026, 10, 2)),
+             8: Job(8, "Globex", "Finance", "applied", updated_at=dt(2026, 10, 3)),
+             12: Job(12, "INITECH", "ML Researcher", "rejected")}
+    emails = [
+        # role "?" = unknown: matches an existing Globex row (the one at the same stage)
+        {"id": "s1", "date": "2026-10-02", "company": "Globex", "role": "?",
+         "stage": "screening", "summary": "You've been successful"},
+        # exact role wins even though the other is more recently updated
+        {"id": "s2", "date": "2026-10-03", "company": "Globex", "role": "Wealth Management",
+         "stage": "interview"},
+        # a rejection for a company whose only application is closed: old news, skipped
+        {"id": "i1", "date": "2026-10-02", "company": "INITECH", "role": "?", "stage": "rejected"},
+    ]
+    out = job_entries_from_emails(emails, known, today=DAY)
+    assert [(e["op"], e.get("job")) for e in out] == [("job_update", 7)]
+    assert [m["id"] for m in out[0]["emails"]] == ["s1", "s2"] and out[0]["stage"] == "interview"
+    assert all(e.get("role") != "?" for e in out)
+
+
+def test_no_duplicate_assessment_tasks():
+    from terminus.actions import job_entries_from_emails
+    mail = lambda i: {"id": f"z{i}", "date": "2026-09-26", "company": "Fabrikam", "role": "Analyst",
+                      "stage": "screening", "subject": "Online assessment", "summary": "Assessment"}
+    out = job_entries_from_emails([mail(1), mail(2)], {}, today=DAY)
+    assert [e["op"] for e in out] == ["job_add", "add"]  # one task for two emails
+    out = job_entries_from_emails([mail(3)], {}, today=DAY,
+                                  open_tasks=["Complete Online Assessment for Fabrikam Graduate"])
+    assert [e["op"] for e in out] == ["job_add"]  # a matching task already exists
+
+
+def test_add_rejects_a_task_already_on_the_list():
+    p = check([{"op": "add", "title": "write  "}, {"op": "add", "title": "Brand new"}])
+    assert p.rejected == ["#1 add: “write” is already on your list as [#1]"]
+    assert [c.title for c in p.changes] == ["Brand new"]

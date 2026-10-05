@@ -734,7 +734,8 @@ class TerminusApp(App):
 
         jobs = {j.id: j for j in self.db.list_jobs()}
         entries = actions.job_entries_from_emails(emails, jobs, logged=self.db.logged_gmail_ids(),
-                                                  today=self._day)
+                                                  today=self._day,
+                                                  open_tasks=self.db.open_task_titles())
         mine = [e for e in emails if str(e.get("stage", "none")).lower() not in ("", "none")]
         unnamed = [e for e in mine if actions.PLACEHOLDER.match(str(e.get("company") or ""))
                    or actions.NOT_EMPLOYERS.match(str(e.get("company") or "").strip())
@@ -762,7 +763,9 @@ class TerminusApp(App):
         self._agent_busy = False
         self._update_agent_status()
         if entries:
-            self._show_proposal(actions.validate(entries, {}, today=self._day,
+            known = {t.id: t for t in self.db.tasks_for_day(self._day)}
+            known.update({t.id: t for t in self.db.upcoming_tasks(self._day, days=60)})
+            self._show_proposal(actions.validate(entries, known, today=self._day,
                                                  now_time=self.now().time(), jobs=jobs))
 
     # ── morning brief ────────────────────────────────────────────────────
