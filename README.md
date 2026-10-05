@@ -189,17 +189,29 @@ game-based tests and assessment centres. An assessment email adds the applicatio
 **Screening** even if its confirmation email was never seen. A deadline in the email
 becomes the next step, and Terminus also proposes a two-pomodoro task to complete it.
 
-**`u` (check email):** Hermes searches your Gmail with its own read-only tools and labels
-each email (company, role, stage, summary, deadline, or "not my application"). Terminus
-then works out the changes against your tracker, in plain code, so the model can't
-invent entries. Terminus never moves an application backwards because of an older email,
-and a closed application stays closed. The proposed changes appear in the usual
-`space` / `y` / `n` panel. Emails that don't change the stage (e.g. "your application
-was viewed") are still logged, as "Log job …" entries. Emails already logged are never
-proposed again, and emails that don't name the employer are skipped. Each check looks
-at the **last 7 days**. Results
-vary a little from run to run (it's a 20B model), so check what you tick. Running `u`
-again only proposes what's still missing.
+**`u` (check email):** asks the **Jobs service** on the Hermes machine
+(`http://<hermes-host>:8643`, using the same API key) for the latest labelled job emails.
+It runs `POST /jobs/refresh`, which checks Gmail first. If that fails, Terminus uses the
+last results (`GET /jobs`) and tells you when they were made. The service also refreshes by
+itself every 2 hours and at logon. Terminus then works out the changes in plain code and
+shows them in the `space` / `y` / `n` panel:
+- Emails are grouped into applications by company and a loose role match (e.g. "2027 Finance
+  Graduate Programme - 1954" ≈ "Finance Graduate Programme"). An email without a role joins
+  the application that already has an email with the same subject, else the company's only
+  open application, else a "?" application.
+- Stage, status and next step come from the newest emails. A rejection always applies. An
+  automatic "application received / under review" email never moves an application back
+  from screening, interview or offer. A rejected or offered application only moves on to a
+  later stage.
+- The next step is the newest one with a due date since the last stage change (else the
+  newest one). Due dates are only ever taken from emails.
+- Each application has **at most one open task**. It is created from the next step, updated
+  rather than duplicated, and completed when the application is rejected. Tasks sync to
+  Todoist like any other.
+- Gmail ids are remembered, so pressing `u` again changes nothing unless something new
+  arrived.
+
+Set a different service URL with `[jobs] service = "http://…:8643"` in `config.toml`.
 
 **Import your Google Sheet:** in Sheets, choose File → Download → CSV, then:
 ```bash

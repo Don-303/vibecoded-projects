@@ -61,6 +61,7 @@ class Config:
     brief_time: time | None = time(6, 0)  # auto-generate after this; None = only on demand
     brief_feeds: dict[str, str] | None = None  # None: terminus.brief.FINANCE_FEEDS
     brief_email: bool = True  # ask Hermes to check Gmail with its own tools
+    jobs_service: str | None = None  # Jobs service URL; None = Hermes' host, port 8643
 
     @classmethod
     def from_env(cls, env: os._Environ[str] | dict[str, str] = os.environ) -> Config:
@@ -68,7 +69,7 @@ class Config:
         file = _config_file()
         planner, todoist = file.get("planner", {}), file.get("todoist", {})
         hermes = file.get("hermes", {})
-        brief = file.get("brief", {})
+        brief, jobs = file.get("brief", {}), file.get("jobs", {})
         brief_at = brief.get("time", "06:00")  # "" or false: only on demand (g)
         return cls(
             db_path=Path(env.get("TERMINUS_DB", "")) if env.get("TERMINUS_DB") else _default_db_path(),
@@ -88,4 +89,5 @@ class Config:
             brief_time=_parse_hhmm(brief_at) if brief_at else None,
             brief_feeds=brief.get("feeds") or None,
             brief_email=bool(brief.get("email", True)),
+            jobs_service=env.get("JOBS_SERVICE") or jobs.get("service") or None,
         )

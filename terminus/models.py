@@ -23,6 +23,7 @@ class Task:
     todoist_id: str | None = None
     overdue_from: date | None = None  # set => in the Overdue list, not on the timeline
     no_due: bool = False  # undated in Todoist => also in the Overdue list
+    job_id: int | None = None  # the job application this task is for
 
     @property
     def backlogged(self) -> bool:

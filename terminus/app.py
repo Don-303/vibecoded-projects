@@ -15,8 +15,9 @@ from textual.screen import ModalScreen
 from textual.widgets import ContentSwitcher, Footer, Input, Markdown, OptionList
 from textual.widgets.markdown import MarkdownStream
 
-from terminus import actions, brief, jobs_stats, stats
-from terminus.agent_client import GMAIL_HINT, HermesClient, HermesError, build_context
+from terminus import actions, brief, job_sync, jobs_stats, stats
+from terminus.jobs_client import JobsService, JobsServiceError, service_url
+from terminus.agent_client import HermesClient, HermesError, build_context
 from terminus.config import Config
 from terminus.db import Database
 from terminus.models import DayPlan, Task
@@ -51,8 +52,6 @@ MAIN_SCREEN_ACTIONS = {
 
 #: Chat turns (user + assistant messages) sent to Hermes as history.
 CHAT_HISTORY = 20
-#: How far back `u` on the Jobs page checks email.
-SCAN_DAYS = 7
 
 
 class TerminusApp(App):
@@ -82,6 +81,7 @@ class TerminusApp(App):
         clock: Callable[[], datetime] = datetime.now,
         todoist: TodoistSync | None = None,
         hermes: HermesClient | None = None,
+        jobs_service: JobsService | None = None,
     ) -> None:
         super().__init__()
         self.register_theme(TERMINUS_THEME)  # before CSS loads: it defines $muted/$faint
@@ -107,6 +107,10 @@ class TerminusApp(App):
         self._sync_again = False
         self.hermes = hermes or HermesClient(
             self.config.hermes_host, self.config.hermes_api_key, model=self.config.hermes_model
+        )
+        self.jobs_service = jobs_service or JobsService(
+            service_url(self.config.jobs_service, self.config.hermes_host),
+            self.config.hermes_api_key,
         )
         self._hermes_online: bool | None = None
         self._chat: list[dict] = []
@@ -521,6 +525,35 @@ class TerminusApp(App):
             self._chat[-1]["content"] += f"\n\n{note}"
         self.query_one(AgentConsole).focus_input()
 
+    def _apply_job_task(self, c: actions.Change, now: datetime) -> None:
+        """Create, update or close a job application's task (synced to Todoist)."""
+        action, due = c.job_fields["action"], c.job_fields["due"]
+        job_id = c.job_id
+        if job_id is None and c.job_fields.get("job_ref"):
+            job = self.db.job_by_email_ref(c.job_fields["job_ref"])
+            job_id = job.id if job else None
+        if action == "create":
+            task_id = self.db.add_task(c.title, due or self._day, tags=["job"], now=now)
+            if due is None:
+                self.db.set_task_due(task_id, None, self._day)  # undated: never invent dates
+            self.db.set_task_job(task_id, job_id)
+            self._pushed(TodoistSync.queue_add, task_id)
+            return
+        before = self.db.get_task(c.task_id)
+        if before is None or before.done:
+            raise LookupError("task no longer open")
+        if action == "close":
+            self.db.set_done(before.id, True, now)
+            self._pushed(TodoistSync.queue_done, before.id, True)
+            return
+        self.db.update_task(before.id, title=c.title, estimate=before.estimate, tags=before.tags,
+                            fixed_start=before.fixed_start if not due else None)
+        if due:
+            self.db.set_task_due(before.id, due, self._day)
+        self.db.set_task_job(before.id, job_id)
+        after = self.db.get_task(before.id)
+        self._pushed(TodoistSync.queue_update, before, after)
+
     def _apply_change(self, c: actions.Change) -> None:
         """Apply one confirmed change through the same paths as the keybindings."""
         now = self.now()
@@ -528,6 +561,9 @@ class TerminusApp(App):
             fields = dict(c.job_fields)
             job_id = self.db.add_job(fields.pop("company"), now=now, **fields)
             self.db.add_job_emails(job_id, c.emails, now)
+            return
+        if c.op == "job_task":
+            self._apply_job_task(c, now)
             return
         if c.op == "job_update":
             if self.db.get_job(c.job_id) is None:
@@ -662,111 +698,64 @@ class TerminusApp(App):
             self.notify(f"Press d again to delete {job.label}.", severity="warning", timeout=4)
 
     def action_scan_job_email(self) -> None:
-        """Ask Hermes to check Gmail for job updates, then propose tracker changes.
-
-        Two steps, because gpt-oss:20b fumbles doing it all at once: (1) Hermes runs a
-        Gmail search and returns just a list of emails; (2) that list plus the tracker
-        go back to Hermes as a normal chat turn, whose proposed changes the user confirms.
-        """
-        if not self.hermes.api_key:
-            self.notify("Connect Hermes first ([4] AI Agent shows how).", severity="warning")
-            return
+        """Ask the Jobs service for new job emails and propose tracker/task changes."""
         if self._agent_busy:
             self.notify("Hermes is still answering…", severity="warning")
             return
-        days = SCAN_DAYS  # a fixed window: already-logged emails are skipped anyway
         self.action_show("agent")
         self._clear_pending_proposal()
-        self.query_one(AgentConsole).add_user(f"Check my email for job updates (last {days} days)")
+        self.query_one(AgentConsole).add_user("Check my email for job updates")
         self._agent_busy = True
-        self.run_worker(self._scan_jobs(days), group="hermes-chat", exit_on_error=False)
+        self.run_worker(self._import_jobs(), group="hermes-chat", exit_on_error=False)
 
-    async def _scan_jobs(self, days: int) -> None:
+    async def _import_jobs(self) -> None:
         console = self.query_one(AgentConsole)
         self._update_agent_status()
-        activity = console.add_activity("⚙ Hermes is searching your Gmail…")
-        query = (f"newer_than:{days}d (application OR applying OR applied OR interview OR "
-                 "assessment OR test OR hirevue OR codility OR hackerrank OR offer OR "
-                 "candidate OR recruiter OR hiring) -category:promotions -category:social")
-        prompt = (
-            f"{GMAIL_HINT} Run search_emails with the query `{query}` (up to 40 results). "
-            "Reply with ONLY a JSON array, one object per email, no prose: "
-            '[{"id": "<gmail message id>", "from": "<sender name>", "subject": "…", '
-            '"date": "YYYY-MM-DD", "company": "<employer the application is with>", '
-            '"role": "<position, or empty if not named>", "stage": "<stage>", '
-            '"summary": "<one line: what this email says, e.g. Online assessment invite>", '
-            '"next_step": "<what I must do next, or empty>", '
-            '"due": "<YYYY-MM-DD deadline or date in the email, or empty>"}]. '
-            'stage is "none" unless the email is about one of MY OWN applications '
-            "(job alerts, newsletters, marketing, courses = none). Otherwise: application "
-            'sent / received / viewed / thanks for applying = "applied"; reminder to finish an '
-            'application = "saved"; ANY assessment = "screening" (online assessment or test, '
-            "HireVue or video interview, Codility / HackerRank / CodeSignal coding test, SHL, "
-            "numerical / verbal / logical reasoning, situational judgement, game-based "
-            "(Pymetrics, Arctic Shores), case study, assessment centre, phone screen); "
-            'interview invite = "interview"; offer = "offer"; unfortunately / not progressing '
-            '= "rejected". Always include assessment emails, even if you never saw the '
-            "application itself. Base every field only on that email; never invent dates. "
-            "Use [] if nothing matches."
-        )
+        activity = console.add_activity("⚙ Checking Gmail for job updates…")
+        note = ""
         try:
-            for attempt in (1, 2):  # the model occasionally answers [] without looking
-                text, tools = "", []
-                async for event in self.hermes.stream_chat([{"role": "user", "content": prompt}]):
-                    if event.kind == "token":
-                        text += event.text
-                    else:
-                        tools.append(event.text)
-                        activity.update(Text(f"⚙ {event.text}", style=MUTED))
-                actions.check_gmail_search(text, tools)  # raises if Gmail wasn't really used
-                emails, dropped = actions.recent_emails(
-                    actions.parse_email_list(text), since=self._day - timedelta(days=days))
-                if emails:
-                    break
-                activity.update(Text("⚙ Nothing found — asking Hermes to search once more…",
+            try:
+                rows, updated = await self.jobs_service.refresh()
+            except JobsServiceError as exc:
+                activity.update(Text(f"⚙ Refresh failed ({exc}) — using the last results…",
                                      style=MUTED))
-        except (HermesError, ValueError) as exc:
-            activity.update("")
-            console.add_error(f"Couldn't get the email list from Hermes: {exc}")
+                rows, updated = await self.jobs_service.latest()
+                note = (f"_Couldn't refresh ({exc}); these are the results from "
+                        f"{updated:%a %d %b %H:%M}._" if updated else
+                        f"_Couldn't refresh ({exc}); showing the last results._")
+        except JobsServiceError as exc:
+            activity.remove()
+            console.add_error(f"Jobs service: {exc}")
             self._agent_busy = False
             self._update_agent_status()
             return
-
-        jobs = {j.id: j for j in self.db.list_jobs()}
-        entries = actions.job_entries_from_emails(emails, jobs, logged=self.db.logged_gmail_ids(),
-                                                  today=self._day,
-                                                  open_tasks=self.db.open_task_titles())
-        mine = [e for e in emails if str(e.get("stage", "none")).lower() not in ("", "none")]
-        unnamed = [e for e in mine if actions.PLACEHOLDER.match(str(e.get("company") or ""))
-                   or actions.NOT_EMPLOYERS.match(str(e.get("company") or "").strip())
-                   or not str(e.get("company") or "").strip()]
-        if not emails:
-            summary = [f"No job-related emails in the last {days} days."]
-        else:
-            summary = [f"Checked {len(emails)} emails from the last {days} days — "
-                       f"{len(mine)} about your applications."]
-        summary += [f"- **{e.get('company') or e.get('from')}** · {e.get('stage')} · "
-                    f"{e.get('subject')}" for e in mine]
-        if dropped:
-            summary.append(f"\n{dropped} ignored: not real Gmail results from the last {days} "
-                           "days (Hermes may have answered from memory — check its Gmail access "
-                           "if this keeps happening).")
-        if unnamed:
-            summary.append(f"\n{len(unnamed)} skipped because the email doesn't name the "
-                           "employer — add those with a on the Jobs page if they matter.")
-        if mine and not entries:
-            summary.append("\nYour tracker is already up to date.")
         activity.remove()
-        console.add_reply("\n".join(summary))
+
+        jobs = self.db.list_jobs()
+        open_tasks = {j.id: t for j in jobs if (t := self.db.open_task_for_job(j.id))}
+        entries = job_sync.plan_job_import(
+            rows, jobs, imported=self.db.job_emails_by_job(), open_tasks=open_tasks,
+            logged_ids=self.db.logged_gmail_ids())
+        mine = [r for r in rows if str(r.get("stage", "none")).lower() not in ("", "none")]
+        summary = [f"Checked {len(rows)} labelled emails — {len(mine)} about your applications."]
+        if updated:
+            summary[0] += f" (updated {updated:%H:%M})"
+        if note:
+            summary.append(note)
+        if not entries:
+            summary.append("Your tracker is already up to date.")
+        console.add_reply("\n\n".join(summary))
         self._chat.append({"role": "user", "content": "Check my email for job updates."})
-        self._chat.append({"role": "assistant", "content": "\n".join(summary)})
+        self._chat.append({"role": "assistant", "content": "\n\n".join(summary)})
         self._agent_busy = False
         self._update_agent_status()
         if entries:
             known = {t.id: t for t in self.db.tasks_for_day(self._day)}
-            known.update({t.id: t for t in self.db.upcoming_tasks(self._day, days=60)})
+            known.update({t.id: t for t in self.db.upcoming_tasks(self._day, days=365)})
+            known.update({t.id: t for t in open_tasks.values()})  # incl. undated/overdue ones
             self._show_proposal(actions.validate(entries, known, today=self._day,
-                                                 now_time=self.now().time(), jobs=jobs))
+                                                 now_time=self.now().time(),
+                                                 jobs={j.id: j for j in jobs}))
 
     # ── morning brief ────────────────────────────────────────────────────
 

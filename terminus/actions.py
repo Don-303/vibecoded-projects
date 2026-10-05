@@ -28,7 +28,7 @@ from terminus.quickadd import parse_time
 
 FENCE = "```terminus-actions"
 BLOCK_RE = re.compile(r"```terminus-actions\s*\n(.*?)(?:```|\Z)", re.S)
-OPS = ("add", "done", "schedule", "edit", "delete", "job_add", "job_update")
+OPS = ("add", "done", "schedule", "edit", "delete", "job_add", "job_update", "job_task")
 JOB_TEXT = ("role", "next_step", "link", "notes", "status")
 MAX_ESTIMATE = 12
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -152,43 +152,6 @@ def gmail_id_date(gmail_id: str) -> date | None:
     return stamp.date() if 2004 <= stamp.year <= 2100 else None  # Gmail launched in 2004
 
 
-def parse_email_list(text: str) -> list[dict]:
-    """The JSON array of emails Hermes returns in step 1 of a job scan.
-
-    Tolerates prose or code fences around the array. Raises ValueError if there
-    isn't one.
-    """
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end < start:
-        raise ValueError("Hermes didn't return an email list")
-    try:
-        data = json.loads(text[start : end + 1])
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"the email list wasn't valid JSON ({exc.msg})") from None
-    emails = [e for e in data if isinstance(e, dict) and (e.get("subject") or e.get("summary"))]
-    for e in emails:
-        e["id"] = str(e.get("id") or "").strip()
-        for key in ("from", "subject", "date", "summary"):
-            e[key] = " ".join(str(e.get(key) or "").split())[:300]  # one line each
-        if real := gmail_id_date(e["id"]):
-            e["date"] = real.isoformat()
-    return emails
-
-
-#: Pipeline order for "don't move backwards"; closing stages are always allowed.
-PROGRESS = {"saved": 0, "applied": 1, "screening": 2, "interview": 3, "offer": 4}
-
-
-ASSESSMENT = re.compile(
-    r"assessment|online test|\btest\b|hirevue|codility|hackerrank|codesignal|pymetrics|"
-    r"\bshl\b|numerical|verbal reasoning|situational judg|game.based|case study|"
-    r"video interview|coding challenge|technical exercise", re.I)
-
-
-def _email_record(e: dict, stage: str) -> dict:
-    return {k: e.get(k, "") for k in ("id", "date", "from", "subject", "summary")} | {"stage": stage}
-
-
 #: Senders that act for employers (assessment platforms, job boards, applicant-tracking
 #: systems). They are never the company an application is with.
 NOT_EMPLOYERS = re.compile(
@@ -197,158 +160,6 @@ NOT_EMPLOYERS = re.compile(
     r"successfactors|taleo|teamtailor|ashby|workable|oleeo|tal\.net|linkedin|indeed|"
     r"glassdoor|reed|totaljobs|bebee|wonka|gradcracker|bright network|prospects|"
     r"jobteaser|handshake|otta|welcome to the jungle|apply4u)\b", re.I)
-
-
-GMAIL_FAILURE = re.compile(r"invalid_grant|unauthori[sz]ed|token (has )?expired|"
-                           r"insufficient (permission|scope)|unable to access", re.I)
-#: Ids a model makes up look like these; real ones are effectively random in their low bits.
-FAKE_ID = re.compile(r"0123456|1234567|2345678|112233|223344|abcdef|(\w)\1{4}")
-
-
-def check_gmail_search(text: str, tool_events: list[str]) -> None:
-    """Raise ValueError unless the reply came from a working Gmail search.
-
-    Hermes' tool events say which tools ran (not their output), so require a Gmail
-    tool call, and treat an auth error quoted in the reply as a failed search.
-    """
-    if failure := GMAIL_FAILURE.search(text):
-        raise ValueError(f"Hermes' Gmail access failed ({failure.group(0)}) — "
-                         "its Gmail sign-in needs renewing on the Hermes machine")
-    if not any("gmail" in e.lower() for e in tool_events):
-        raise ValueError("Hermes answered without searching Gmail, so the result "
-                         "can't be trusted — try again")
-
-
-def recent_emails(emails: list[dict], since: date) -> tuple[list[dict], int]:
-    """Keep emails whose Gmail id is real and dates from ``since`` onwards.
-
-    If the Gmail tool fails, the model can answer from memory instead of a search:
-    those entries have made-up ids or old dates. Returns (kept, number dropped).
-    """
-    kept = [e for e in emails if (d := gmail_id_date(e.get("id", ""))) and d >= since
-            and not FAKE_ID.search(e["id"][-12:])]
-    return kept, len(emails) - len(kept)
-
-
-def _match_job(jobs: dict[int, Job], ref: str | None, company: str, role: str,
-               stage: str) -> Job | None:
-    """The tracked application an email is about, or None for a new application.
-
-    Several applications at one company: an exact role match wins; otherwise prefer
-    an open one at the email's stage, then the most recently updated. If only
-    closed ones match, a fresh application (anything but a rejection/withdrawal)
-    is a new row, and a rejection is old news for the closed one.
-    """
-    if ref and (by_ref := next((j for j in jobs.values() if j.email_ref == ref), None)):
-        return by_ref
-    same = [j for j in jobs.values() if j.company.lower() == company.lower()]
-    if role and (exact := [j for j in same if j.role and j.role.lower() == role.lower()]):
-        return min(exact, key=lambda j: j.closed)  # open first
-    fits = [j for j in same if not role or not j.role]
-    open_ = [j for j in fits if not j.closed]
-    if open_:
-        return max(open_, key=lambda j: (j.stage == stage, j.updated_at or datetime.min))
-    if fits and stage in CLOSED:
-        return fits[0]  # the caller skips closed applications
-    return None
-
-
-CLOSED = {"rejected", "withdrawn"}
-
-
-def job_entries_from_emails(
-    emails: list[dict],
-    jobs: dict[int, Job],
-    *,
-    logged: set[str] = frozenset(),
-    today: date | None = None,
-    open_tasks: list[str] = (),
-) -> list[dict]:
-    """Turn Hermes' labelled email list into job_add / job_update (+ task) entries.
-
-    Deterministic on purpose: the model only labels each email (company, role,
-    stage, summary, due); matching against the tracker happens here, so it can't
-    invent entries. Emails are handled oldest first, so the newest word on an
-    application sets its status. Every new email is attached to its application;
-    emails in ``logged`` were handled by an earlier scan and are skipped. An
-    assessment email also proposes a task to do it.
-    """
-    today = today or date.today()
-    updates: dict[int, dict] = {}  # job id → job_update entry
-    adds: list[dict] = []
-    tasks: list[dict] = []
-    state = {j.id: j.stage for j in jobs.values()}
-
-    for e in sorted(emails, key=lambda e: e.get("date") or ""):
-        raw_stage = str(e.get("stage") or "").strip().lower()
-        company = str(e.get("company") or "").strip()
-        ref = e.get("id") or None
-        if (not company or PLACEHOLDER.match(company) or NOT_EMPLOYERS.match(company)
-                or raw_stage in ("", "none", "null", "n/a", "not_application", "ignore")):
-            continue  # not about an application, or the employer isn't named
-        if ref and ref in logged:
-            continue
-        stage = _stage(raw_stage)
-        role = str(e.get("role") or "").strip()
-        if PLACEHOLDER.match(role) or "application" in role.lower():
-            role = ""  # "Application", "HR Application"… describe the email, not a position
-        summary = str(e.get("summary") or "").strip()
-        try:
-            due = date.fromisoformat(str(e.get("due") or "")[:10])
-        except ValueError:
-            due = None
-        text = f"{e.get('subject', '')} {summary}"
-        is_assessment = stage == "screening" and bool(ASSESSMENT.search(text))
-        next_step = str(e.get("next_step") or "").strip()
-        if PLACEHOLDER.match(next_step):
-            next_step = ""
-        if is_assessment and not next_step:
-            next_step = "Complete assessment"
-
-        job = _match_job(jobs, ref, company, role, stage)
-        if job is not None:
-            if job.closed:
-                continue
-            entry = updates.setdefault(job.id, {"op": "job_update", "job": job.id, "emails": []})
-            entry["emails"].append(_email_record(e, stage))
-            if summary:
-                entry["status"] = summary
-            current = state[job.id]
-            moves_on = stage not in PROGRESS or PROGRESS[stage] > PROGRESS.get(current, 0)
-            if stage != current and moves_on:
-                state[job.id] = stage
-                entry["stage"] = stage
-            target = entry
-        else:
-            key = (company.lower(), role.lower())
-            target = next((a for a in adds if a["company"].lower() == key[0] and (
-                not a.get("role") or not key[1] or a["role"].lower() == key[1])), None)
-            if target is None:
-                target = {"op": "job_add", "company": company, "stage": stage,
-                          "email_ref": ref, "emails": []}
-                if stage != "saved" and e.get("date"):
-                    target["applied_on"] = e["date"]
-                adds.append(target)
-            elif stage not in PROGRESS or PROGRESS[stage] > PROGRESS.get(target["stage"], 0):
-                target["stage"] = stage
-            if role and not target.get("role"):
-                target["role"] = role
-            target["emails"].append(_email_record(e, stage))
-            if summary:
-                target["status"] = summary
-
-        if next_step or due:
-            target["next_step"] = next_step
-            if due:
-                target["next_date"] = due.isoformat()
-        already = [t for t in list(open_tasks) + [x["title"] for x in tasks]
-                   if company.lower() in t.lower() and "assessment" in t.lower()]
-        if is_assessment and not already and (due is None or due >= today):
-            label = f"{company} {role}".strip() if role else company
-            tasks.append({"op": "add", "title": f"{label} assessment",
-                          "day": (due or today).isoformat(), "estimate": 2, "tags": ["job"]})
-
-    return adds + list(updates.values()) + tasks
 
 
 def parse_day(value, today: date) -> date:
@@ -402,6 +213,9 @@ def validate(
     jobs = jobs or {}
     for i, entry in enumerate(entries, 1):
         try:
+            if isinstance(entry, dict) and entry.get("op") == "job_task":
+                proposal.changes.append(_job_task_change(entry, jobs, tasks, today))
+                continue
             if isinstance(entry, dict) and str(entry.get("op", "")).startswith("job_"):
                 proposal.changes.append(_job_change(entry, jobs, today))
                 continue
@@ -504,10 +318,11 @@ PLACEHOLDER = re.compile(r"^\W*(unknown|n/?a|none|tbc|tbd|not (specified|stated|
 
 def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
     fields: dict = {}
+    trusted = bool(entry.get("import"))  # from terminus.job_sync: already cleaned, "" clears
     for key in JOB_TEXT:
         if entry.get(key) is not None:
             value = str(entry[key]).strip()
-            if not PLACEHOLDER.match(value):
+            if trusted or not PLACEHOLDER.match(value):
                 fields[key] = value
     if fields.get("link") and not fields["link"].startswith(("http://", "https://")):
         raise ValueError(f"link {fields['link']!r} isn't a web address")
@@ -535,7 +350,7 @@ def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
         if not company:
             raise ValueError("needs a company")
         ref = str(entry.get("email_ref") or "").strip() or None
-        for job in jobs.values():
+        for job in ([] if trusted else jobs.values()):  # the importer already matched
             if ref and job.email_ref == ref:
                 raise ValueError(f"that email is already tracked as [J#{job.id}] {job.label}")
             same_role = not fields.get("role") or not job.role or \
@@ -573,3 +388,41 @@ def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
     detail = " · ".join(diffs) if diffs else ""
     summary = f"{verb} job “{job.label}”" + (f" · {detail}" if detail else "") + mail_note
     return Change("job_update", summary, job_id=job.id, job_fields=changed, emails=emails)
+
+
+def _job_task_change(entry: dict, jobs: dict[int, Job], tasks: dict[int, Task],
+                     today: date) -> Change:
+    """The one open task of a job application: create, update (title/due) or close it."""
+    action = entry.get("action")
+    job = jobs.get(int(entry["job"])) if entry.get("job") is not None else None
+    if job is None and not entry.get("job_ref"):
+        raise ValueError(f"no job [J#{entry.get('job')}]")
+    company = job.company if job else str(entry.get("title", "")).split(":")[0]
+    due = date.fromisoformat(entry["due"]) if entry.get("due") else None
+    fields = {"action": action, "job_ref": entry.get("job_ref"), "due": due}
+    if action == "create":
+        title = str(entry.get("title") or "").strip()
+        if not title:
+            raise ValueError("needs a title")
+        when = f" · due {due:%a %d %b}" if due else " · no date"
+        return Change("job_task", f"Add task “{title}”{when}", title=title,
+                      job_id=job.id if job else None, job_fields=fields)
+    task = tasks.get(int(entry.get("task", -1)))
+    if task is None or task.done:
+        raise ValueError(f"no open task [#{entry.get('task')}] for {company}")
+    if action == "close":
+        return Change("job_task", f"Complete task “{task.title}” (application rejected)",
+                      task_id=task.id, job_id=job.id if job else None, job_fields=fields)
+    if action == "update":
+        title = str(entry.get("title") or task.title).strip()
+        parts = []
+        if title != task.title:
+            parts.append(f"→ “{title}”")
+        if due and due != task.day:
+            parts.append(f"due {due:%a %d %b}")
+        if not parts:
+            raise ValueError(f"nothing to change on task “{task.title}”")
+        return Change("job_task", f"Update task “{task.title}” " + " · ".join(parts),
+                      title=title, task_id=task.id, job_id=job.id if job else None,
+                      job_fields=fields)
+    raise ValueError(f"unknown task action {action!r}")

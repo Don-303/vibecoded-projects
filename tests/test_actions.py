@@ -158,73 +158,6 @@ def test_placeholder_roles_are_dropped():
     assert "role" not in p.changes[0].job_fields and "next_step" not in p.changes[0].job_fields
 
 
-def test_parse_email_list():
-    from terminus.actions import parse_email_list
-    text = 'Here you go:\n```json\n[{"id": 12, "from": "Acme", "subject": "Thanks\\nfor applying",' \
-           ' "summary": "applied"}, {"id": "x"}, "junk"]\n```'
-    assert parse_email_list(text) == [{"id": "12", "from": "Acme", "subject": "Thanks for applying",
-                                       "date": "", "summary": "applied"}]
-    assert parse_email_list("[]") == []
-    with pytest.raises(ValueError, match="didn't return"):
-        parse_email_list("I couldn't access Gmail.")
-
-
-def test_job_entries_from_emails():
-    from terminus.actions import job_entries_from_emails
-    from terminus.models import Job
-    known = {3: Job(3, "Northwind", "Quant Research Intern", "interview"),
-             4: Job(4, "INITECH", "", "rejected"),
-             5: Job(5, "Umbrella", "", "applied")}
-    emails = [
-        {"id": "a", "date": "2026-09-20", "company": "Acme", "role": "", "stage": "saved",
-         "subject": "Finish your application", "summary": "Reminder to finish"},
-        {"id": "b", "date": "2026-09-22", "company": "acme", "role": "Analyst", "stage": "applied",
-         "subject": "Thanks for applying", "summary": "Application received"},
-        {"id": "c", "date": "2026-09-21", "company": "Northwind", "role": "Quant Research Intern",
-         "stage": "applied", "summary": "Old confirmation"},  # older news: stage stays interview
-        {"id": "d", "date": "2026-09-24", "company": "Northwind", "role": "", "stage": "rejected",
-         "summary": "Not progressing"},
-        {"id": "e", "date": "2026-09-23", "company": "INITECH", "stage": "interview"},  # closed → new
-        {"id": "f", "date": "2026-09-25", "company": "beBee", "stage": "none"},
-        {"id": "g", "date": "2026-09-25", "company": "", "stage": "applied"},
-        {"id": "h", "date": "2026-09-25", "company": "Umbrella", "stage": "applied",
-         "subject": "Your application was viewed", "summary": "Application viewed"},
-        {"id": "old", "date": "2026-09-19", "company": "Umbrella", "stage": "applied"},  # logged
-        {"id": "u", "date": "2026-09-25", "company": "Unknown", "stage": "applied"},  # unnamed
-    ]
-    out = job_entries_from_emails(emails, known, logged={"old"}, today=DAY)
-    acme, initech_new, p72, city = out
-    # INITECH's only application is closed, so an interview email is a new application
-    assert initech_new["op"] == "job_add" and initech_new["company"] == "INITECH"
-    assert acme["op"] == "job_add" and acme["company"] == "Acme" and acme["role"] == "Analyst"
-    assert acme["stage"] == "applied" and acme["status"] == "Application received"
-    assert [m["id"] for m in acme["emails"]] == ["a", "b"]
-    assert p72 == {"op": "job_update", "job": 3, "stage": "rejected", "status": "Not progressing",
-                   "emails": [p72["emails"][0], p72["emails"][1]]}
-    assert [m["id"] for m in p72["emails"]] == ["c", "d"]
-    assert city["job"] == 5 and "stage" not in city and city["status"] == "Application viewed"
-    assert [m["id"] for m in city["emails"]] == ["h"]
-
-
-def test_assessment_email_tracks_job_and_proposes_task():
-    from terminus.actions import job_entries_from_emails
-    emails = [{"id": "z1", "date": "2026-09-26", "company": "Fabrikam", "role": "Graduate Analyst",
-               "stage": "screening", "subject": "Online assessment: Graduate Analyst",
-               "summary": "Online assessment invite", "due": "2026-10-03"}]
-    job, task = job_entries_from_emails(emails, {}, today=DAY)
-    assert job["op"] == "job_add" and job["stage"] == "screening"
-    assert job["next_step"] == "Complete assessment" and job["next_date"] == "2026-10-03"
-    assert task == {"op": "add", "title": "Fabrikam Graduate Analyst assessment", "day": "2026-10-03",
-                    "estimate": 2, "tags": ["job"]}
-    # a deadline that has passed: still tracked, but no task
-    emails[0]["due"] = "2026-09-01"
-    assert [e["op"] for e in job_entries_from_emails(emails, {}, today=DAY)] == ["job_add"]
-    # a screening phone call isn't an assessment task
-    call = [{"id": "z2", "date": "2026-09-26", "company": "Contoso", "stage": "screening",
-             "subject": "Quick chat", "summary": "Recruiter phone call"}]
-    assert [e["op"] for e in job_entries_from_emails(call, {}, today=DAY)] == ["job_add"]
-
-
 def test_validate_job_emails_and_log_only_updates():
     from terminus.models import Job
     jobs = {5: Job(5, "Umbrella", "", "applied")}
@@ -240,86 +173,13 @@ def test_validate_job_emails_and_log_only_updates():
     assert p.changes[1].job_fields == {} and p.changes[1].emails[0]["id"] == "h"
 
 
-def test_email_dates_come_from_gmail_ids():
-    from terminus.actions import gmail_id_date, parse_email_list
-    assert gmail_id_date("1a0d8ba30a200001") == date(2026, 9, 25)  # INITECH update, 25 Sep 13:21 UTC
-    assert gmail_id_date("m-1") is None and gmail_id_date("") is None
-    listed = parse_email_list('[{"id": "1a0d4bb881c61918", "subject": "Thanks", "date": "2026-09-30"}]')
-    assert listed[0]["date"] == "2026-09-24"  # the model said the 30th; the id says the 24th
-
-
-def test_recent_emails_drops_memory_answers():
-    from datetime import datetime as dt
-    from conftest import gmail_id
-    from terminus.actions import recent_emails
-    real = {"id": gmail_id(dt(2026, 9, 24, 12))}
-    old = {"id": gmail_id(dt(2026, 9, 1, 12))}
-    fake = {"id": "initech-rejection"}
-    kept, dropped = recent_emails([real, old, fake], since=date(2026, 9, 18))
-    assert kept == [real] and dropped == 2
-
-
-def test_platforms_are_never_the_company():
-    from terminus.actions import job_entries_from_emails
-    emails = [{"id": "x1", "date": "2026-09-24", "company": "HireVue", "stage": "screening"},
-              {"id": "x2", "date": "2026-09-24", "company": "LinkedIn", "stage": "applied"},
-              {"id": "x3", "date": "2026-09-24", "company": "Codility", "stage": "screening"}]
-    assert job_entries_from_emails(emails, {}, today=DAY) == []
-
-
-def test_check_gmail_search():
-    import pytest
-    from terminus.actions import check_gmail_search
-    ok = ["mcp__gmail_readonly__search_emails · running", "mcp__gmail_readonly__search_emails · completed"]
-    check_gmail_search("[]", ok)  # fine
-    with pytest.raises(ValueError, match="sign-in needs renewing"):
-        check_gmail_search("Error: Invalid grant — unable to access inbox threads.", ok)
-    with pytest.raises(ValueError, match="without searching Gmail"):
-        check_gmail_search('[{"id": "1a0d112233445566"}]', [])
-
-
-def test_fabricated_ids_are_dropped():
-    from terminus.actions import recent_emails
-    kept, dropped = recent_emails([{"id": "1a0d112233445566"}, {"id": "1a0d900123456789"}],
-                                  since=date(2026, 9, 1))
-    assert kept == [] and dropped == 2
-
-
-def test_matching_with_unknown_roles_and_several_applications():
-    from datetime import datetime as dt
-    from terminus.actions import job_entries_from_emails
-    from terminus.models import Job
-    known = {7: Job(7, "Globex", "Wealth Management", "screening", updated_at=dt(2026, 10, 2)),
-             8: Job(8, "Globex", "Finance", "applied", updated_at=dt(2026, 10, 3)),
-             12: Job(12, "INITECH", "ML Researcher", "rejected")}
-    emails = [
-        # role "?" = unknown: matches an existing Globex row (the one at the same stage)
-        {"id": "s1", "date": "2026-10-02", "company": "Globex", "role": "?",
-         "stage": "screening", "summary": "You've been successful"},
-        # exact role wins even though the other is more recently updated
-        {"id": "s2", "date": "2026-10-03", "company": "Globex", "role": "Wealth Management",
-         "stage": "interview"},
-        # a rejection for a company whose only application is closed: old news, skipped
-        {"id": "i1", "date": "2026-10-02", "company": "INITECH", "role": "?", "stage": "rejected"},
-    ]
-    out = job_entries_from_emails(emails, known, today=DAY)
-    assert [(e["op"], e.get("job")) for e in out] == [("job_update", 7)]
-    assert [m["id"] for m in out[0]["emails"]] == ["s1", "s2"] and out[0]["stage"] == "interview"
-    assert all(e.get("role") != "?" for e in out)
-
-
-def test_no_duplicate_assessment_tasks():
-    from terminus.actions import job_entries_from_emails
-    mail = lambda i: {"id": f"z{i}", "date": "2026-09-26", "company": "Fabrikam", "role": "Analyst",
-                      "stage": "screening", "subject": "Online assessment", "summary": "Assessment"}
-    out = job_entries_from_emails([mail(1), mail(2)], {}, today=DAY)
-    assert [e["op"] for e in out] == ["job_add", "add"]  # one task for two emails
-    out = job_entries_from_emails([mail(3)], {}, today=DAY,
-                                  open_tasks=["Complete Online Assessment for Fabrikam Graduate"])
-    assert [e["op"] for e in out] == ["job_add"]  # a matching task already exists
-
-
 def test_add_rejects_a_task_already_on_the_list():
     p = check([{"op": "add", "title": "write  "}, {"op": "add", "title": "Brand new"}])
     assert p.rejected == ["#1 add: “write” is already on your list as [#1]"]
     assert [c.title for c in p.changes] == ["Brand new"]
+
+
+def test_gmail_id_date():
+    from terminus.actions import gmail_id_date
+    assert gmail_id_date("1a0d8ba30a200001") == date(2026, 9, 25)  # INITECH update, 25 Sep 13:21 UTC
+    assert gmail_id_date("m-1") is None and gmail_id_date("") is None

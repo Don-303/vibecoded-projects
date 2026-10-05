@@ -128,6 +128,10 @@ MIGRATIONS = [
         UNIQUE (job_id, gmail_id)
     );
     """,
+    # v8: a task can belong to a job application (at most one open task per job)
+    """
+    ALTER TABLE tasks ADD COLUMN job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL;
+    """,
 ]
 
 
@@ -145,6 +149,7 @@ def _task(row: sqlite3.Row) -> Task:
         todoist_id=row["todoist_id"],
         overdue_from=date.fromisoformat(row["overdue_from"]) if row["overdue_from"] else None,
         no_due=bool(row["no_due"]),
+        job_id=row["job_id"],
     )
 
 
@@ -287,6 +292,34 @@ class Database:
             "SELECT * FROM tasks WHERE day = ? ORDER BY position", (day.isoformat(),)
         )
         return [_task(r) for r in rows]
+
+    def open_task_for_job(self, job_id: int) -> Task | None:
+        row = self.conn.execute(
+            "SELECT * FROM tasks WHERE job_id = ? AND status = 'todo' ORDER BY id LIMIT 1", (job_id,)
+        ).fetchone()
+        return _task(row) if row else None
+
+    def set_task_job(self, task_id: int, job_id: int | None) -> None:
+        with self.conn:
+            self.conn.execute("UPDATE tasks SET job_id = ? WHERE id = ?", (job_id, task_id))
+
+    def set_task_due(self, task_id: int, due: date | None, today: date) -> None:
+        """Give a task a due day, or none (it then sits in the undated list on today)."""
+        with self.conn:
+            if due is None:
+                self.conn.execute(
+                    "UPDATE tasks SET day = ?, no_due = 1, overdue_from = NULL WHERE id = ?",
+                    (today.isoformat(), task_id))
+            else:
+                self.conn.execute(
+                    "UPDATE tasks SET day = ?, no_due = 0, overdue_from = NULL, fixed_start = NULL"
+                    " WHERE id = ?", (due.isoformat(), task_id))
+
+    def job_emails_by_job(self) -> dict[int, list[JobEmail]]:
+        out: dict[int, list[JobEmail]] = {}
+        for job in self.list_jobs():
+            out[job.id] = self.job_emails(job.id)
+        return out
 
     def open_task_titles(self) -> list[str]:
         """Titles of every unfinished task, any day."""

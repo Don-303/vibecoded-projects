@@ -502,71 +502,6 @@ async def test_jobs_page_add_stage_toggle_delete(config, clock):
         assert app.db.get_job(job.id) is None
 
 
-async def test_scan_email_labels_then_terminus_proposes(config, clock):
-    import json
-    from fake_hermes import FakeHermes
-    from terminus.agent_client import HermesClient
-    db = Database(":memory:")
-    p72 = db.add_job("Northwind", role="Quant Research Intern", now=clock.now)
-    from conftest import gmail_id
-    from datetime import datetime as dt
-    m1, m9, m5 = (gmail_id(dt(2026, 9, d, 10), i) for i, d in ((1, 24), (2, 23), (3, 25)))
-    labelled = "```json\n" + json.dumps([
-        {"id": m1, "from": "Northwind", "subject": "Interview invitation", "date": "2026-09-24",
-         "company": "Northwind", "role": "Quant Research Intern", "stage": "interview",
-         "summary": "First-round interview"},
-        {"id": m9, "from": "LinkedIn", "subject": "Your application was sent to Acme",
-         "date": "2026-09-23", "company": "Acme", "role": "Junior Analyst", "stage": "applied"},
-        {"id": m5, "from": "beBee", "subject": "20 jobs for you", "date": "2026-09-25",
-         "company": "", "stage": "none"},
-        # answered from memory, not from the search: a fake id and an old date
-        {"id": "initech-1", "from": "INITECH", "subject": "Update", "date": "2026-09-01",
-         "company": "INITECH", "stage": "rejected"},
-        {"id": gmail_id(dt(2026, 9, 1, 9)), "from": "Old", "subject": "Old news",
-         "company": "Old Co", "stage": "applied"},
-        # an assessment platform is never the company
-        {"id": gmail_id(dt(2026, 9, 24, 9), 7), "from": "HireVue", "subject": "Your video interview",
-         "company": "HireVue", "stage": "screening"},
-    ]) + "\n```"
-    fake = FakeHermes(replies=[labelled])
-    fake.tool_name = "mcp__gmail_readonly__search_emails"
-    app = TerminusApp(config=config, db=db, clock=clock,
-                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
-    async with app.run_test(size=(120, 50)) as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.press("6", "u")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert app.current_view == "agent" and len(fake.requests) == 1  # one Hermes call
-        assert "newer_than:7d" in fake.requests[0]["messages"][0]["content"]
-        shown = app.query_one(".agent-reply").source
-        assert "Checked 4 emails from the last 7 days — 3 about your applications." in shown
-        assert "2 ignored: not real Gmail results" in shown
-        assert "1 skipped because the email doesn't name the employer" in shown
-        await pilot.press("y")
-        await pilot.pause()
-        assert app.db.get_job(p72).stage == "interview"
-        acme = app.db.find_job("Acme")
-        assert acme.email_ref == m9 and str(acme.applied_on) == "2026-09-23"
-        assert app.db.find_job("HireVue") is None and app.db.find_job("INITECH") is None
-
-
-async def test_scan_email_with_nothing_found(config, clock):
-    from fake_hermes import FakeHermes
-    from terminus.agent_client import HermesClient
-    fake = FakeHermes(replies=["[]", "[]"])
-    fake.tool_name = "mcp__gmail_readonly__search_emails"
-    app = TerminusApp(config=config, db=Database(":memory:"), clock=clock,
-                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
-    async with app.run_test(size=(120, 50)) as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.press("6", "u")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert len(fake.requests) == 2 and not app._agent_busy  # retried once
-        assert "No job-related emails in the last 7 days." in app.query_one(".agent-reply").source
-
-
 def test_import_jobs_cli(tmp_path, monkeypatch, capsys):
     from terminus.app import main
     monkeypatch.setenv("TERMINUS_DB", str(tmp_path / "t.db"))
@@ -579,75 +514,6 @@ def test_import_jobs_cli(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Added 1:" in out and "Northwind — Quant Intern · interview" in out
     assert Database(tmp_path / "t.db").find_job("Northwind").stage == "interview"
-
-
-async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkeypatch):
-    import json
-    from fake_hermes import FakeHermes
-    from terminus.agent_client import HermesClient
-    from terminus.widgets import JobDetail
-    opened = []
-    monkeypatch.setattr("webbrowser.open", opened.append)
-    db = Database(":memory:")
-    city = db.add_job("Umbrella", now=clock.now)
-    from conftest import gmail_id
-    from datetime import datetime as dt
-    z1, c1 = gmail_id(dt(2026, 9, 25, 9), 1), gmail_id(dt(2026, 9, 24, 9), 2)
-    labelled = json.dumps([
-        {"id": z1, "from": "Fabrikam", "subject": "Online assessment: Graduate Analyst",
-         "date": "2026-09-25", "company": "Fabrikam", "role": "Graduate Analyst", "stage": "screening",
-         "summary": "Online assessment invite", "next_step": "", "due": "2026-10-03"},
-        {"id": c1, "from": "LinkedIn", "subject": "Your application was viewed",
-         "date": "2026-09-24", "company": "Umbrella", "role": "", "stage": "applied",
-         "summary": "Application viewed by Umbrella HR"},
-    ])
-    fake = FakeHermes(replies=[labelled])
-    fake.tool_name = "mcp__gmail_readonly__search_emails"
-    app = TerminusApp(config=config, db=db, clock=clock,
-                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
-    async with app.run_test(size=(130, 50)) as pilot:
-        await app.workers.wait_for_complete()
-        await pilot.press("6", "u")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        summaries = [c.summary for c in app._proposal.proposal.changes]
-        assert summaries == [
-            "Track job “Fabrikam — Graduate Analyst” · Screening · next: Sat 03 Oct Complete assessment"
-            " · status: Online assessment invite · +1 email",
-            "Update job “Umbrella” · status: Application viewed by Umbrella HR · +1 email",
-            "Add “Fabrikam Graduate Analyst assessment” · Sat 03 Oct ~2 #job",
-        ]
-        await pilot.press("y")
-        await pilot.pause()
-        fabrikam = app.db.find_job("Fabrikam")
-        assert fabrikam.stage == "screening" and fabrikam.status == "Online assessment invite"
-        assert str(fabrikam.next_date) == "2026-10-03"
-        assert [e.gmail_id for e in app.db.job_emails(fabrikam.id)] == [z1]
-        assert app.db.job_emails(city)[0].summary == "Application viewed by Umbrella HR"
-        from datetime import date
-        task = app.db.tasks_for_day(date(2026, 10, 3))[0]  # 8 days out: beyond "upcoming"
-        assert (task.title, str(task.day), task.estimate) == ("Fabrikam Graduate Analyst assessment",
-                                                             "2026-10-03", 2)
-
-        # details: enter on the Fabrikam row, then o opens its email in Gmail
-        app.action_show("jobs")  # (after y the chat input has focus, so "6" would be typed)
-        await pilot.pause()
-        view = app.query_one("#jobs-table")
-        view.move_cursor(row=view.get_row_index(str(fabrikam.id)))
-        await pilot.press("enter")
-        assert isinstance(app.screen, JobDetail)
-        assert "Online assessment invite" in str(app.screen.query_one("#jd-emails").get_option_at_index(0).prompt)
-        await pilot.press("o")
-        assert opened == [f"https://mail.google.com/mail/u/0/#all/{z1}"]
-        await pilot.press("escape")
-        assert not isinstance(app.screen, JobDetail)
-
-        # a second scan of the same emails proposes nothing new
-        fake.replies = [labelled]
-        await pilot.press("u")
-        await app.workers.wait_for_complete()
-        await pilot.pause()
-        assert app._proposal is None
 
 
 async def test_jobs_split_by_day_with_stats_margin(config, clock):
@@ -678,18 +544,98 @@ async def test_jobs_split_by_day_with_stats_margin(config, clock):
         assert not isinstance(app.screen, ModalScreen)
 
 
-async def test_scan_refuses_results_when_gmail_failed(config, clock):
-    from fake_hermes import FakeHermes
-    from terminus.agent_client import HermesClient
-    fake = FakeHermes(replies=["Error: Invalid grant — unable to access inbox threads."])
-    fake.tool_name = "mcp__gmail_readonly__list_inbox_threads"
-    app = TerminusApp(config=config, db=Database(":memory:"), clock=clock,
-                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
-    async with app.run_test(size=(120, 40)) as pilot:
-        await app.workers.wait_for_complete()
+# ── Jobs service import (u) ──
+
+def service_rows():
+    from datetime import datetime as dt
+    from conftest import gmail_id
+    def r(company, stage, when, n, **kw):
+        base = {"id": gmail_id(when, n), "from": company, "subject": f"{company} {stage}",
+                "date": when.strftime("%Y-%m-%d"), "company": company, "role": "",
+                "stage": stage, "summary": f"{company}: {stage}", "next_step": "", "due": ""}
+        return base | kw
+    return [
+        r("Fabrikam", "applied", dt(2026, 9, 21, 9), 1, role="Graduate Analyst"),
+        r("Fabrikam", "screening", dt(2026, 9, 23, 9), 2, role="Graduate Analyst",
+          next_step="Complete assessment", due="2026-10-07", summary="Assessment invite"),
+        r("Northwind", "applied", dt(2026, 9, 22, 9), 3),
+        r("Northwind", "rejected", dt(2026, 9, 24, 9), 4, summary="Not progressing"),
+        r("LinkedIn", "applied", dt(2026, 9, 24, 9), 5),  # a job board: skipped
+        r("Some newsletter", "none", dt(2026, 9, 24, 9), 6),
+    ]
+
+
+def make_import_app(config, clock, db=None):
+    from fake_jobs_service import FakeJobsService
+    fake = FakeJobsService(service_rows())
+    app = TerminusApp(config=config, db=db or Database(":memory:"), clock=clock,
+                      jobs_service=fake.client())
+    return app, fake
+
+
+async def test_u_imports_from_the_jobs_service(config, clock):
+    from datetime import date
+    from terminus.widgets.proposal_panel import ProposalPanel
+    db = Database(":memory:")
+    p72 = db.add_job("Northwind", role="?", now=clock.now)
+    t = db.add_task("Northwind: Online test", clock.now.date(), tags=["job"], now=clock.now)
+    db.set_task_job(t, p72)
+    app, fake = make_import_app(config, clock, db)
+    async with app.run_test(size=(140, 50)) as pilot:
         await pilot.press("6", "u")
         await app.workers.wait_for_complete()
         await pilot.pause()
-        error = str(app.query(".agent-error").last().render())
-        assert "invalid_grant" in error.lower().replace(" ", "_") or "sign-in needs renewing" in error
-        assert app._proposal is None and not app._agent_busy
+        assert fake.calls == ["POST /jobs/refresh"]
+        shown = app.query(".agent-reply").last().source
+        assert "Checked 6 labelled emails — 5 about your applications." in shown
+        summaries = [c.summary for c in app.query_one(ProposalPanel).proposal.changes]
+        assert any(s.startswith("Track job “Fabrikam — Graduate Analyst” · Screening") for s in summaries)
+        assert any(s.startswith("Update job “Northwind — ?” · Applied → Rejected") for s in summaries)
+        assert "Add task “Fabrikam: Complete assessment” · due Wed 07 Oct" in summaries
+        assert "Complete task “Northwind: Online test” (application rejected)" in summaries
+        await pilot.press("y")
+        await pilot.pause()
+        fabrikam = app.db.find_job("Fabrikam")
+        assert (fabrikam.stage, fabrikam.next_date, len(app.db.job_emails(fabrikam.id))) == (
+            "screening", date(2026, 10, 7), 2)
+        assert app.db.get_job(p72).stage == "rejected"
+        assert app.db.get_task(t).done  # rejected → its task is completed
+        task = app.db.open_task_for_job(fabrikam.id)
+        assert (task.title, task.day) == ("Fabrikam: Complete assessment", date(2026, 10, 7))
+        assert app.db.find_job("LinkedIn") is None
+
+        # pressing u again changes nothing
+        app.query_one("#agent-input").blur()
+        app.action_show("jobs")
+        await pilot.press("u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "already up to date" in app.query(".agent-reply").last().source
+        assert app._proposal is None
+
+
+async def test_u_falls_back_to_last_results_when_refresh_fails(config, clock):
+    app, fake = make_import_app(config, clock)
+    fake.refresh_fails = True
+    async with app.run_test(size=(140, 50)) as pilot:
+        await pilot.press("6", "u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert fake.calls == ["POST /jobs/refresh", "GET /jobs"]
+        shown = app.query(".agent-reply").last().source
+        assert "Couldn't refresh" in shown and "results from Fri 25 Sep" in shown
+        assert app._proposal is not None  # the last results are still offered
+
+
+async def test_u_reports_a_rejected_key(config, clock):
+    from fake_jobs_service import FakeJobsService
+    from terminus.jobs_client import JobsService
+    fake = FakeJobsService(service_rows())
+    app = TerminusApp(config=config, db=Database(":memory:"), clock=clock,
+                      jobs_service=JobsService("http://box:8643", "wrong", transport=fake.transport))
+    async with app.run_test(size=(140, 50)) as pilot:
+        await pilot.press("6", "u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert "rejected the API key" in str(app.query(".agent-error").last().render())
+        assert not app._agent_busy
