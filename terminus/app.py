@@ -717,7 +717,8 @@ class TerminusApp(App):
                         text += event.text
                     else:
                         activity.update(Text(f"⚙ {event.text}", style=MUTED))
-                emails = actions.parse_email_list(text)
+                emails, dropped = actions.recent_emails(
+                    actions.parse_email_list(text), since=self._day - timedelta(days=days))
                 if emails:
                     break
                 activity.update(Text("⚙ Nothing found — asking Hermes to search once more…",
@@ -734,6 +735,7 @@ class TerminusApp(App):
                                                   today=self._day)
         mine = [e for e in emails if str(e.get("stage", "none")).lower() not in ("", "none")]
         unnamed = [e for e in mine if actions.PLACEHOLDER.match(str(e.get("company") or ""))
+                   or actions.NOT_EMPLOYERS.match(str(e.get("company") or "").strip())
                    or not str(e.get("company") or "").strip()]
         if not emails:
             summary = [f"No job-related emails in the last {days} days."]
@@ -742,6 +744,10 @@ class TerminusApp(App):
                        f"{len(mine)} about your applications."]
         summary += [f"- **{e.get('company') or e.get('from')}** · {e.get('stage')} · "
                     f"{e.get('subject')}" for e in mine]
+        if dropped:
+            summary.append(f"\n{dropped} ignored: not real Gmail results from the last {days} "
+                           "days (Hermes may have answered from memory — check its Gmail access "
+                           "if this keeps happening).")
         if unnamed:
             summary.append(f"\n{len(unnamed)} skipped because the email doesn't name the "
                            "employer — add those with a on the Jobs page if they matter.")

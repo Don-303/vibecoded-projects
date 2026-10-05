@@ -244,3 +244,22 @@ def test_email_dates_come_from_gmail_ids():
     assert gmail_id_date("m-1") is None and gmail_id_date("") is None
     listed = parse_email_list('[{"id": "1a0d4bb881c61918", "subject": "Thanks", "date": "2026-09-30"}]')
     assert listed[0]["date"] == "2026-09-24"  # the model said the 30th; the id says the 24th
+
+
+def test_recent_emails_drops_memory_answers():
+    from datetime import datetime as dt
+    from conftest import gmail_id
+    from terminus.actions import recent_emails
+    real = {"id": gmail_id(dt(2026, 9, 24, 12))}
+    old = {"id": gmail_id(dt(2026, 9, 1, 12))}
+    fake = {"id": "initech-rejection"}
+    kept, dropped = recent_emails([real, old, fake], since=date(2026, 9, 18))
+    assert kept == [real] and dropped == 2
+
+
+def test_platforms_are_never_the_company():
+    from terminus.actions import job_entries_from_emails
+    emails = [{"id": "x1", "date": "2026-09-24", "company": "HireVue", "stage": "screening"},
+              {"id": "x2", "date": "2026-09-24", "company": "LinkedIn", "stage": "applied"},
+              {"id": "x3", "date": "2026-09-24", "company": "Codility", "stage": "screening"}]
+    assert job_entries_from_emails(emails, {}, today=DAY) == []

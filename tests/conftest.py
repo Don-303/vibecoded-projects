@@ -36,3 +36,8 @@ class FakeClock:
 @pytest.fixture
 def clock():
     return FakeClock(datetime.combine(DAY, time(10, 0)))
+
+
+def gmail_id(when: datetime, n: int = 0) -> str:
+    """A realistic Gmail message id for ``when`` (ms timestamp in the high bits)."""
+    return format((int(when.timestamp() * 1000) << 20) | n, "x")

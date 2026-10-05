@@ -508,14 +508,25 @@ async def test_scan_email_labels_then_terminus_proposes(config, clock):
     from terminus.agent_client import HermesClient
     db = Database(":memory:")
     p72 = db.add_job("Northwind", role="Quant Research Intern", now=clock.now)
+    from conftest import gmail_id
+    from datetime import datetime as dt
+    m1, m9, m5 = (gmail_id(dt(2026, 9, d, 10), i) for i, d in ((1, 24), (2, 23), (3, 25)))
     labelled = "```json\n" + json.dumps([
-        {"id": "m-1", "from": "Northwind", "subject": "Interview invitation", "date": "2026-09-24",
+        {"id": m1, "from": "Northwind", "subject": "Interview invitation", "date": "2026-09-24",
          "company": "Northwind", "role": "Quant Research Intern", "stage": "interview",
          "summary": "First-round interview"},
-        {"id": "m-9", "from": "LinkedIn", "subject": "Your application was sent to Acme",
+        {"id": m9, "from": "LinkedIn", "subject": "Your application was sent to Acme",
          "date": "2026-09-23", "company": "Acme", "role": "Junior Analyst", "stage": "applied"},
-        {"id": "m-5", "from": "beBee", "subject": "20 jobs for you", "date": "2026-09-25",
+        {"id": m5, "from": "beBee", "subject": "20 jobs for you", "date": "2026-09-25",
          "company": "", "stage": "none"},
+        # answered from memory, not from the search: a fake id and an old date
+        {"id": "initech-1", "from": "INITECH", "subject": "Update", "date": "2026-09-01",
+         "company": "INITECH", "stage": "rejected"},
+        {"id": gmail_id(dt(2026, 9, 1, 9)), "from": "Old", "subject": "Old news",
+         "company": "Old Co", "stage": "applied"},
+        # an assessment platform is never the company
+        {"id": gmail_id(dt(2026, 9, 24, 9), 7), "from": "HireVue", "subject": "Your video interview",
+         "company": "HireVue", "stage": "screening"},
     ]) + "\n```"
     fake = FakeHermes(replies=[labelled])
     fake.tool_events = False
@@ -529,12 +540,15 @@ async def test_scan_email_labels_then_terminus_proposes(config, clock):
         assert app.current_view == "agent" and len(fake.requests) == 1  # one Hermes call
         assert "newer_than:7d" in fake.requests[0]["messages"][0]["content"]
         shown = app.query_one(".agent-reply").source
-        assert "Checked 3 emails from the last 7 days — 2 about your applications." in shown
+        assert "Checked 4 emails from the last 7 days — 3 about your applications." in shown
+        assert "2 ignored: not real Gmail results" in shown
+        assert "1 skipped because the email doesn't name the employer" in shown
         await pilot.press("y")
         await pilot.pause()
         assert app.db.get_job(p72).stage == "interview"
         acme = app.db.find_job("Acme")
-        assert acme.email_ref == "m-9" and str(acme.applied_on) == "2026-09-23"
+        assert acme.email_ref == m9 and str(acme.applied_on) == "2026-09-23"
+        assert app.db.find_job("HireVue") is None and app.db.find_job("INITECH") is None
 
 
 async def test_scan_email_with_nothing_found(config, clock):
@@ -575,11 +589,14 @@ async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkey
     monkeypatch.setattr("webbrowser.open", opened.append)
     db = Database(":memory:")
     city = db.add_job("Umbrella", now=clock.now)
+    from conftest import gmail_id
+    from datetime import datetime as dt
+    z1, c1 = gmail_id(dt(2026, 9, 25, 9), 1), gmail_id(dt(2026, 9, 24, 9), 2)
     labelled = json.dumps([
-        {"id": "z1", "from": "Fabrikam", "subject": "Online assessment: Graduate Analyst",
+        {"id": z1, "from": "Fabrikam", "subject": "Online assessment: Graduate Analyst",
          "date": "2026-09-25", "company": "Fabrikam", "role": "Graduate Analyst", "stage": "screening",
          "summary": "Online assessment invite", "next_step": "", "due": "2026-10-03"},
-        {"id": "c1", "from": "LinkedIn", "subject": "Your application was viewed",
+        {"id": c1, "from": "LinkedIn", "subject": "Your application was viewed",
          "date": "2026-09-24", "company": "Umbrella", "role": "", "stage": "applied",
          "summary": "Application viewed by Umbrella HR"},
     ])
@@ -604,7 +621,7 @@ async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkey
         fabrikam = app.db.find_job("Fabrikam")
         assert fabrikam.stage == "screening" and fabrikam.status == "Online assessment invite"
         assert str(fabrikam.next_date) == "2026-10-03"
-        assert [e.gmail_id for e in app.db.job_emails(fabrikam.id)] == ["z1"]
+        assert [e.gmail_id for e in app.db.job_emails(fabrikam.id)] == [z1]
         assert app.db.job_emails(city)[0].summary == "Application viewed by Umbrella HR"
         from datetime import date
         task = app.db.tasks_for_day(date(2026, 10, 3))[0]  # 8 days out: beyond "upcoming"
@@ -620,7 +637,7 @@ async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkey
         assert isinstance(app.screen, JobDetail)
         assert "Online assessment invite" in str(app.screen.query_one("#jd-emails").get_option_at_index(0).prompt)
         await pilot.press("o")
-        assert opened == ["https://mail.google.com/mail/u/0/#all/z1"]
+        assert opened == [f"https://mail.google.com/mail/u/0/#all/{z1}"]
         await pilot.press("escape")
         assert not isinstance(app.screen, JobDetail)
 

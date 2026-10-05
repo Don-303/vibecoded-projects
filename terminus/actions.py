@@ -189,6 +189,26 @@ def _email_record(e: dict, stage: str) -> dict:
     return {k: e.get(k, "") for k in ("id", "date", "from", "subject", "summary")} | {"stage": stage}
 
 
+#: Senders that act for employers (assessment platforms, job boards, applicant-tracking
+#: systems). They are never the company an application is with.
+NOT_EMPLOYERS = re.compile(
+    r"^(hirevue|codility|hackerrank|codesignal|shl|pymetrics|arctic shores|cappfinity|"
+    r"talogy|criteria|testgorilla|workday|greenhouse|lever|smartrecruiters|icims|"
+    r"successfactors|taleo|teamtailor|ashby|workable|oleeo|tal\.net|linkedin|indeed|"
+    r"glassdoor|reed|totaljobs|bebee|wonka|gradcracker|bright network|prospects|"
+    r"jobteaser|handshake|otta|welcome to the jungle|apply4u)\b", re.I)
+
+
+def recent_emails(emails: list[dict], since: date) -> tuple[list[dict], int]:
+    """Keep emails whose Gmail id is real and dates from ``since`` onwards.
+
+    If the Gmail tool fails, the model can answer from memory instead of a search:
+    those entries have made-up ids or old dates. Returns (kept, number dropped).
+    """
+    kept = [e for e in emails if (d := gmail_id_date(e.get("id", ""))) and d >= since]
+    return kept, len(emails) - len(kept)
+
+
 def job_entries_from_emails(
     emails: list[dict],
     jobs: dict[int, Job],
@@ -215,7 +235,7 @@ def job_entries_from_emails(
         raw_stage = str(e.get("stage") or "").strip().lower()
         company = str(e.get("company") or "").strip()
         ref = e.get("id") or None
-        if (not company or PLACEHOLDER.match(company)
+        if (not company or PLACEHOLDER.match(company) or NOT_EMPLOYERS.match(company)
                 or raw_stage in ("", "none", "null", "n/a", "not_application", "ignore")):
             continue  # not about an application, or the employer isn't named
         if ref and ref in logged:
