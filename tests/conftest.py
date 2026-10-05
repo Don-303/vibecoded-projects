@@ -39,5 +39,11 @@ def clock():
 
 
 def gmail_id(when: datetime, n: int = 0) -> str:
-    """A realistic Gmail message id for ``when`` (ms timestamp in the high bits)."""
-    return format((int(when.timestamp() * 1000) << 20) | n, "x")
+    """A realistic Gmail message id for ``when`` (ms timestamp in the high bits).
+
+    Real ids have arbitrary milliseconds and low bits, so mix ``n`` in: ids full of
+    zeros would (rightly) look made up.
+    """
+    ms = int(when.timestamp() * 1000) + 357 + 131 * n
+    low = (n * 2654435761 + 0x5BD1E) & 0xFFFFF
+    return format((ms << 20) | low, "x")

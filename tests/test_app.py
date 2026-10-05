@@ -529,7 +529,7 @@ async def test_scan_email_labels_then_terminus_proposes(config, clock):
          "company": "HireVue", "stage": "screening"},
     ]) + "\n```"
     fake = FakeHermes(replies=[labelled])
-    fake.tool_events = False
+    fake.tool_name = "mcp__gmail_readonly__search_emails"
     app = TerminusApp(config=config, db=db, clock=clock,
                       hermes=HermesClient("box", "hermes-key", transport=fake.transport))
     async with app.run_test(size=(120, 50)) as pilot:
@@ -555,6 +555,7 @@ async def test_scan_email_with_nothing_found(config, clock):
     from fake_hermes import FakeHermes
     from terminus.agent_client import HermesClient
     fake = FakeHermes(replies=["[]", "[]"])
+    fake.tool_name = "mcp__gmail_readonly__search_emails"
     app = TerminusApp(config=config, db=Database(":memory:"), clock=clock,
                       hermes=HermesClient("box", "hermes-key", transport=fake.transport))
     async with app.run_test(size=(120, 50)) as pilot:
@@ -601,7 +602,7 @@ async def test_scan_logs_emails_status_and_assessment_task(config, clock, monkey
          "summary": "Application viewed by Umbrella HR"},
     ])
     fake = FakeHermes(replies=[labelled])
-    fake.tool_events = False
+    fake.tool_name = "mcp__gmail_readonly__search_emails"
     app = TerminusApp(config=config, db=db, clock=clock,
                       hermes=HermesClient("box", "hermes-key", transport=fake.transport))
     async with app.run_test(size=(130, 50)) as pilot:
@@ -675,3 +676,20 @@ async def test_jobs_split_by_day_with_stats_margin(config, clock):
         await pilot.press("up")  # onto the "This week" heading: actions ignore it
         await pilot.press("s")
         assert not isinstance(app.screen, ModalScreen)
+
+
+async def test_scan_refuses_results_when_gmail_failed(config, clock):
+    from fake_hermes import FakeHermes
+    from terminus.agent_client import HermesClient
+    fake = FakeHermes(replies=["Error: Invalid grant — unable to access inbox threads."])
+    fake.tool_name = "mcp__gmail_readonly__list_inbox_threads"
+    app = TerminusApp(config=config, db=Database(":memory:"), clock=clock,
+                      hermes=HermesClient("box", "hermes-key", transport=fake.transport))
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.press("6", "u")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        error = str(app.query(".agent-error").last().render())
+        assert "invalid_grant" in error.lower().replace(" ", "_") or "sign-in needs renewing" in error
+        assert app._proposal is None and not app._agent_busy

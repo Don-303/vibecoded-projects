@@ -711,12 +711,14 @@ class TerminusApp(App):
         )
         try:
             for attempt in (1, 2):  # the model occasionally answers [] without looking
-                text = ""
+                text, tools = "", []
                 async for event in self.hermes.stream_chat([{"role": "user", "content": prompt}]):
                     if event.kind == "token":
                         text += event.text
                     else:
+                        tools.append(event.text)
                         activity.update(Text(f"⚙ {event.text}", style=MUTED))
+                actions.check_gmail_search(text, tools)  # raises if Gmail wasn't really used
                 emails, dropped = actions.recent_emails(
                     actions.parse_email_list(text), since=self._day - timedelta(days=days))
                 if emails:

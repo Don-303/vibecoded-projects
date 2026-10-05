@@ -199,13 +199,34 @@ NOT_EMPLOYERS = re.compile(
     r"jobteaser|handshake|otta|welcome to the jungle|apply4u)\b", re.I)
 
 
+GMAIL_FAILURE = re.compile(r"invalid_grant|unauthori[sz]ed|token (has )?expired|"
+                           r"insufficient (permission|scope)|unable to access", re.I)
+#: Ids a model makes up look like these; real ones are effectively random in their low bits.
+FAKE_ID = re.compile(r"0123456|1234567|2345678|112233|223344|abcdef|(\w)\1{4}")
+
+
+def check_gmail_search(text: str, tool_events: list[str]) -> None:
+    """Raise ValueError unless the reply came from a working Gmail search.
+
+    Hermes' tool events say which tools ran (not their output), so require a Gmail
+    tool call, and treat an auth error quoted in the reply as a failed search.
+    """
+    if failure := GMAIL_FAILURE.search(text):
+        raise ValueError(f"Hermes' Gmail access failed ({failure.group(0)}) — "
+                         "its Gmail sign-in needs renewing on the Hermes machine")
+    if not any("gmail" in e.lower() for e in tool_events):
+        raise ValueError("Hermes answered without searching Gmail, so the result "
+                         "can't be trusted — try again")
+
+
 def recent_emails(emails: list[dict], since: date) -> tuple[list[dict], int]:
     """Keep emails whose Gmail id is real and dates from ``since`` onwards.
 
     If the Gmail tool fails, the model can answer from memory instead of a search:
     those entries have made-up ids or old dates. Returns (kept, number dropped).
     """
-    kept = [e for e in emails if (d := gmail_id_date(e.get("id", ""))) and d >= since]
+    kept = [e for e in emails if (d := gmail_id_date(e.get("id", ""))) and d >= since
+            and not FAKE_ID.search(e["id"][-12:])]
     return kept, len(emails) - len(kept)
 
 

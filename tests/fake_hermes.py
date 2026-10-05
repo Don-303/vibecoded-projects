@@ -15,6 +15,7 @@ class FakeHermes:
         self.replies = list(replies or [])  # one per request, then falls back to `reply`
         self.online = True
         self.tool_events = True
+        self.tool_name = "terminal"  # what the progress event says ran
         self.requests: list[dict] = []
         self.transport = httpx.MockTransport(self.handle)
 
@@ -30,7 +31,8 @@ class FakeHermes:
         reply = self.replies.pop(0) if self.replies else self.reply
         chunks = [": keepalive\n\n"]
         if self.tool_events:
-            chunks.append('event: hermes.tool.progress\ndata: {"tool": "terminal", "status": "running"}\n\n')
+            chunks.append("event: hermes.tool.progress\ndata: "
+                          + json.dumps({"tool": self.tool_name, "status": "running"}) + "\n\n")
         for word in reply.split(" "):
             delta = {"choices": [{"delta": {"content": word + " "}, "index": 0}]}
             chunks.append(f"data: {json.dumps(delta)}\n\n")

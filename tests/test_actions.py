@@ -263,3 +263,21 @@ def test_platforms_are_never_the_company():
               {"id": "x2", "date": "2026-09-24", "company": "LinkedIn", "stage": "applied"},
               {"id": "x3", "date": "2026-09-24", "company": "Codility", "stage": "screening"}]
     assert job_entries_from_emails(emails, {}, today=DAY) == []
+
+
+def test_check_gmail_search():
+    import pytest
+    from terminus.actions import check_gmail_search
+    ok = ["mcp__gmail_readonly__search_emails · running", "mcp__gmail_readonly__search_emails · completed"]
+    check_gmail_search("[]", ok)  # fine
+    with pytest.raises(ValueError, match="sign-in needs renewing"):
+        check_gmail_search("Error: Invalid grant — unable to access inbox threads.", ok)
+    with pytest.raises(ValueError, match="without searching Gmail"):
+        check_gmail_search('[{"id": "1a0d112233445566"}]', [])
+
+
+def test_fabricated_ids_are_dropped():
+    from terminus.actions import recent_emails
+    kept, dropped = recent_emails([{"id": "1a0d112233445566"}, {"id": "1a0d900123456789"}],
+                                  since=date(2026, 9, 1))
+    assert kept == [] and dropped == 2
