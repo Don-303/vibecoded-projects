@@ -379,6 +379,8 @@ def _job_change(entry: dict, jobs: dict[int, Job], today: date) -> Change:
         diffs.append(f"{job.stage.capitalize()} → {changed['stage'].capitalize()}")
     if next_bits := describe(changed):
         diffs.append(next_bits)
+    if "next_step" in changed and not changed["next_step"] and not changed.get("next_date"):
+        diffs.append("next step cleared")
     if "status" in changed:
         diffs.append(f"status: {changed['status']}")
     others = sorted(set(changed) - {"stage", "next_step", "next_date", "status"})
@@ -411,7 +413,8 @@ def _job_task_change(entry: dict, jobs: dict[int, Job], tasks: dict[int, Task],
     if task is None or task.done:
         raise ValueError(f"no open task [#{entry.get('task')}] for {company}")
     if action == "close":
-        return Change("job_task", f"Complete task “{task.title}” (application rejected)",
+        reason = entry.get("reason") or "application rejected"
+        return Change("job_task", f"Complete task “{task.title}” ({reason})",
                       task_id=task.id, job_id=job.id if job else None, job_fields=fields)
     if action == "update":
         title = str(entry.get("title") or task.title).strip()

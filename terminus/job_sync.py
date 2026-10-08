@@ -34,7 +34,10 @@ from terminus.models import STAGES, Job, JobEmail, Task
 GENERIC = {"graduate", "graduates", "programme", "program", "scheme", "the", "and", "of", "for",
            "role", "position", "application", "job", "in", "at", "a", "an", "uk", "london"}
 YEAR = re.compile(r"^20[23]\d$")  # intake years; programme numbers like 1954/1999 must survive
-FORWARD = {"screening": 2, "interview": 3, "offer": 4}  # stages that can follow rejected/offer
+FORWARD = {"screening": 2, "interview": 3, "offer": 4}  # stages an acknowledgement can't undo
+#: What can revive a rejected (or move on an offered) application. Not "screening": after a
+#: rejection those are feedback reports and assessment results, not new progress.
+REVIVE = {"interview", "offer"}
 CLOSED = {"rejected", "withdrawn"}
 
 
@@ -108,12 +111,19 @@ def _clean(e: dict) -> dict | None:
         "id": gid, "company": company, "role": "" if blank(role) else role, "stage": stage,
         "from": str(e.get("from") or "").strip(), "subject": str(e.get("subject") or "").strip(),
         "summary": " ".join(str(e.get("summary") or "").split()),
-        "next_step": "" if PLACEHOLDER.match(str(e.get("next_step") or "")) else
-        " ".join(str(e.get("next_step") or "").split()),
+        "next_step": _actionable(str(e.get("next_step") or "")),
         "due": due if re.match(r"^\d{4}-\d{2}-\d{2}$", due) else "",
         "date": gmail_id_date(gid).isoformat(),  # trust the id, not the label
         "ts": stamp(gid),
     }
+
+
+def _actionable(step: str) -> str:
+    """A next step worth a task: not a placeholder, not conditional ("If you have…")."""
+    step = " ".join(step.split())
+    if PLACEHOLDER.match(step) or re.match(r"(?i)^(if|should|in case|when ready)\b", step):
+        return ""
+    return step
 
 
 def _find(apps: list[App], e: dict) -> App | None:
@@ -249,7 +259,7 @@ def _next_stage(current: str | None, incoming: str) -> str:
     if current is None or incoming in CLOSED:
         return incoming
     if current in ("rejected", "offer", "withdrawn"):
-        return incoming if incoming in FORWARD and incoming != current else current
+        return incoming if incoming in REVIVE and incoming != current else current
     if incoming in ("saved", "applied") and current in FORWARD:
         return current  # an acknowledgement doesn't undo progress
     return incoming
@@ -260,6 +270,11 @@ def _task_entries(app: App, state: dict, task: Task | None, ref: dict) -> list[d
         return [{"op": "job_task", "action": "close", "task": task.id, **ref}] if task else []
     step = state["next_step"]
     if not step:
+        # the task was made from a next step that no longer applies: close it too
+        old = app.job.next_step.rstrip(". ") if app.job and app.job.next_step else ""
+        if task and old and task.title == f"{app.company}: {old}":
+            return [{"op": "job_task", "action": "close", "task": task.id,
+                     "reason": "next step no longer applies", **ref}]
         return []
     title = f"{app.company}: {step.rstrip('. ')}"
     due = state["next_date"].isoformat() if state["next_date"] else ""

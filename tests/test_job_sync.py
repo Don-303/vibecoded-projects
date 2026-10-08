@@ -135,3 +135,32 @@ def test_jobs_the_service_does_not_mention_are_left_alone():
     gid = gmail_id(datetime(2026, 9, 20, 9), 4)
     imported = {10: [JobEmail(gid, date(2026, 9, 20), "", "Added", "Added to list", "saved")]}
     assert plan([], [cyberdyne], imported, logged={gid}) == []
+
+
+def test_feedback_after_rejection_does_not_revive():
+    """Globex: Stage 2 rejection at 12:00, then an assessment feedback report at 16:32."""
+    wm = Job(7, "Globex", "Wealth Management", "screening")
+    task = Task(18, "Globex: Review the assessment feedback report", date(2026, 10, 9), 1, job_id=7)
+    rows = [row("Globex", "rejected", datetime(2026, 10, 6, 12), role="Wealth Management", n=1),
+            row("Globex", "screening", datetime(2026, 10, 6, 16, 32), role="Wealth Management",
+                n=2, next_step="Review the assessment feedback report")]
+    upd, close = plan(rows, [wm], open_tasks={7: task})
+    assert upd["stage"] == "rejected"
+    assert close == {"op": "job_task", "action": "close", "task": 18, "job": 7}
+    # but an interview invite after a rejection does revive it
+    rows.append(row("Globex", "interview", datetime(2026, 10, 7, 9), role="Wealth Management", n=3))
+    assert plan(rows, [wm])[0]["stage"] == "interview"
+
+
+def test_conditional_next_steps_make_no_task():
+    out = plan([row("Stark", "screening", datetime(2026, 10, 7, 9),
+                    next_step="If you have mitigating circumstances, email the team")])
+    assert [e["op"] for e in out] == ["job_add"] and out[0]["next_step"] == ""
+    # an existing task made from that step gets completed, with the reason
+    stark = Job(11, "Stark", "", "screening", next_step="If you have mitigating circumstances, email the team")
+    task = Task(21, "Stark: If you have mitigating circumstances, email the team", date(2026, 10, 8), 1, job_id=11)
+    upd, close = plan([row("Stark", "screening", datetime(2026, 10, 7, 9), n=5,
+                           next_step="If you have mitigating circumstances, email the team")],
+                      [stark], open_tasks={11: task})
+    assert close == {"op": "job_task", "action": "close", "task": 21,
+                     "reason": "next step no longer applies", "job": 11}
