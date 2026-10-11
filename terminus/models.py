@@ -112,6 +112,7 @@ class Job:
     email_ref: str | None = None  # Gmail message id, so email updates aren't added twice
     notes: str = ""
     status: str = ""  # free text: what's happening now ("Online assessment due Fri")
+    task_step: str = ""  # the next step its task was made for (not re-made once dealt with)
     updated_at: datetime | None = None
 
     @property

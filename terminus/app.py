@@ -537,6 +537,8 @@ class TerminusApp(App):
             if due is None:
                 self.db.set_task_due(task_id, None, self._day)  # undated: never invent dates
             self.db.set_task_job(task_id, job_id)
+            if job_id and c.job_fields.get("step"):
+                self.db.update_job(job_id, task_step=c.job_fields["step"], now=now)
             self._pushed(TodoistSync.queue_add, task_id)
             return
         before = self.db.get_task(c.task_id)
@@ -551,6 +553,8 @@ class TerminusApp(App):
         if due:
             self.db.set_task_due(before.id, due, self._day)
         self.db.set_task_job(before.id, job_id)
+        if job_id and c.job_fields.get("step"):
+            self.db.update_job(job_id, task_step=c.job_fields["step"], now=now)
         after = self.db.get_task(before.id)
         self._pushed(TodoistSync.queue_update, before, after)
 

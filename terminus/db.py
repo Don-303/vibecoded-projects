@@ -132,6 +132,13 @@ MIGRATIONS = [
     """
     ALTER TABLE tasks ADD COLUMN job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL;
     """,
+    # v9: the next step a job's task was made for, so a task the user completed or deleted
+    #     isn't made again until a new next step arrives; back-filled from existing tasks
+    """
+    ALTER TABLE jobs ADD COLUMN task_step TEXT NOT NULL DEFAULT '';
+    UPDATE jobs SET task_step = next_step
+     WHERE next_step != '' AND id IN (SELECT job_id FROM tasks WHERE job_id IS NOT NULL);
+    """,
 ]
 
 
@@ -166,12 +173,13 @@ def _job(row: sqlite3.Row) -> Job:
         email_ref=row["email_ref"],
         notes=row["notes"],
         status=row["status"],
+        task_step=row["task_step"],
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
 
 
 JOB_FIELDS = ("company", "role", "stage", "applied_on", "next_step", "next_date", "link",
-              "email_ref", "notes", "status")
+              "email_ref", "notes", "status", "task_step")
 
 
 def _job_value(field: str, value):

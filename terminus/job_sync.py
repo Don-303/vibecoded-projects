@@ -38,6 +38,7 @@ FORWARD = {"screening": 2, "interview": 3, "offer": 4}  # stages an acknowledgem
 #: What can revive a rejected (or move on an offered) application. Not "screening": after a
 #: rejection those are feedback reports and assessment results, not new progress.
 REVIVE = {"interview", "offer"}
+PIPELINE = {"saved": 0, "applied": 1, "screening": 2, "interview": 3, "offer": 4}
 CLOSED = {"rejected", "withdrawn"}
 
 
@@ -260,8 +261,8 @@ def _next_stage(current: str | None, incoming: str) -> str:
         return incoming
     if current in ("rejected", "offer", "withdrawn"):
         return incoming if incoming in REVIVE and incoming != current else current
-    if incoming in ("saved", "applied") and current in FORWARD:
-        return current  # an acknowledgement doesn't undo progress
+    if PIPELINE.get(incoming, 0) < PIPELINE.get(current, 0):
+        return current  # reminders and acknowledgements don't undo progress
     return incoming
 
 
@@ -279,8 +280,13 @@ def _task_entries(app: App, state: dict, task: Task | None, ref: dict) -> list[d
     title = f"{app.company}: {step.rstrip('. ')}"
     due = state["next_date"].isoformat() if state["next_date"] else ""
     if task is None:
-        return [{"op": "job_task", "action": "create", "title": title, "due": due, **ref}]
-    if task.title != title or (due and task.day.isoformat() != due):
+        if app.job and app.job.task_step == step:
+            return []  # its task was completed or deleted: don't bring it back
+        return [{"op": "job_task", "action": "create", "title": title, "due": due,
+                 "step": step, **ref}]
+    # an overdue task has been carried forward to today; its original day is overdue_from
+    current_due = (task.overdue_from or task.day).isoformat()
+    if task.title != title or (due and current_due != due):
         return [{"op": "job_task", "action": "update", "task": task.id, "title": title,
-                 "due": due, **ref}]
+                 "due": due, "step": step, **ref}]
     return []

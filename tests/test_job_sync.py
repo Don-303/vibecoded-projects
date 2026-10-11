@@ -45,7 +45,7 @@ def test_groups_emails_and_newest_wins():
     assert fabrikam["applied_on"] == "2026-09-30" and len(fabrikam["emails"]) == 2
     assert bs["stage"] == "rejected" and bs["role"] == "?"
     assert task == {"op": "job_task", "action": "create", "title": "Fabrikam: Complete assessment",
-                    "due": "2026-10-07", "job_ref": fabrikam["email_ref"]}
+                    "due": "2026-10-07", "step": "Complete assessment", "job_ref": fabrikam["email_ref"]}
 
 
 def test_updates_existing_job_and_its_one_task():
@@ -60,7 +60,8 @@ def test_updates_existing_job_and_its_one_task():
                    "status": "Reminder", "next_step": "Complete assessment",
                    "next_date": date(2026, 10, 7)}  # stage unchanged, so not proposed
     assert t == {"op": "job_task", "action": "update", "task": 15, "job": 3,
-                 "title": "Fabrikam: Complete assessment", "due": "2026-10-07"}
+                 "title": "Fabrikam: Complete assessment", "due": "2026-10-07",
+                 "step": "Complete assessment"}
     # running again after applying: everything matches, so nothing is proposed
     fabrikam.status, fabrikam.next_step, fabrikam.next_date = "Reminder", "Complete assessment", date(2026, 10, 7)
     imported[3].append(JobEmail(rows[0]["id"], date(2026, 10, 5), "", rows[0]["subject"],
@@ -164,3 +165,36 @@ def test_conditional_next_steps_make_no_task():
                       [stark], open_tasks={11: task})
     assert close == {"op": "job_task", "action": "close", "task": 21,
                      "reason": "next step no longer applies", "job": 11}
+
+
+def test_reminders_do_not_undo_progress():
+    """Hooli: interview invite, then 'last reminder' and 'thanks for starting' (screening)."""
+    hooli = Job(19, "Hooli", "Grad Scheme", "applied")
+    rows = [row("Hooli", "interview", datetime(2026, 10, 7, 9), n=1, role="Grad Scheme"),
+            row("Hooli", "screening", datetime(2026, 10, 8, 9), n=2, role="Grad Scheme"),
+            row("Hooli", "screening", datetime(2026, 10, 10, 9), n=3, role="Grad Scheme")]
+    assert plan(rows, [hooli])[0]["stage"] == "interview"
+
+
+def test_a_completed_or_deleted_task_is_not_made_again():
+    fabrikam = Job(3, "Fabrikam", "Graduate Analyst", "screening", next_step="Complete all three assessments",
+               task_step="Complete all three assessments")
+    rows = [row("Fabrikam", "screening", datetime(2026, 10, 9, 9), role="Graduate Analyst", n=7,
+                next_step="Complete all three assessments")]
+    out = plan(rows, [fabrikam])  # no open task: the user ticked it off
+    assert [e["op"] for e in out] == ["job_update"]
+    # a genuinely new next step does make a task
+    rows.append(row("Fabrikam", "interview", datetime(2026, 10, 12, 9), role="Graduate Analyst", n=8,
+                    next_step="Book your interview slot"))
+    assert plan(rows, [fabrikam])[-1]["title"] == "Fabrikam: Book your interview slot"
+
+
+def test_overdue_task_is_not_moved_back_every_day():
+    mott = Job(20, "Wayne Enterprises", "Risk", "screening", next_step="Complete the assessment",
+               task_step="Complete the assessment")
+    task = Task(25, "Wayne Enterprises: Complete the assessment", date(2026, 10, 11), 1, job_id=20,
+                overdue_from=date(2026, 10, 9))  # carried forward from its due day
+    rows = [row("Wayne Enterprises", "screening", datetime(2026, 10, 7, 9), role="Risk", n=1,
+                next_step="Complete the assessment", due="2026-10-09")]
+    out = plan(rows, [mott], open_tasks={20: task})
+    assert all(e["op"] != "job_task" for e in out)

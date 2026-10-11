@@ -401,7 +401,8 @@ def _job_task_change(entry: dict, jobs: dict[int, Job], tasks: dict[int, Task],
         raise ValueError(f"no job [J#{entry.get('job')}]")
     company = job.company if job else str(entry.get("title", "")).split(":")[0]
     due = date.fromisoformat(entry["due"]) if entry.get("due") else None
-    fields = {"action": action, "job_ref": entry.get("job_ref"), "due": due}
+    fields = {"action": action, "job_ref": entry.get("job_ref"), "due": due,
+              "step": entry.get("step", "")}
     if action == "create":
         title = str(entry.get("title") or "").strip()
         if not title:
