@@ -1,0 +1,380 @@
+/* Terminus — calm dark theme. Colours come from the "terminus" Textual theme
+   (terminus/theme.py): $primary = cyan accent, $success = soft green. */
+
+Screen {
+    background: $background;
+}
+
+#main {
+    height: 1fr;
+}
+
+/* ── sidebar ─────────────────────────────────────────────── */
+
+#sidebar {
+    width: 28;
+    background: $surface;
+    border-right: tall $faint;
+    padding: 1 1;
+}
+
+#brand {
+    color: $primary;
+    text-style: bold;
+    padding: 0 1 1 1;
+}
+
+#nav {
+    height: auto;
+    background: $surface;
+    border: none;
+    padding: 0;
+    margin-bottom: 1;
+}
+
+#nav:focus {
+    border: none;
+}
+
+#nav > .option-list--option-highlighted {
+    background: $panel;
+    color: $primary;
+    text-style: bold;
+}
+
+#status {
+    border-top: solid $faint;
+    padding: 1 1 0 1;
+}
+
+/* ── content ─────────────────────────────────────────────── */
+
+#content {
+    padding: 1 2;
+}
+
+.view-title {
+    text-style: bold;
+    color: $foreground;
+    margin-bottom: 1;
+}
+
+#today-summary {
+    margin-bottom: 1;
+}
+
+#timeline-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $faint;
+    scrollbar-background: $background;
+}
+
+#timeline-scroll:focus {
+    background-tint: $foreground 0%;
+}
+
+.placeholder {
+    color: $muted;
+}
+
+/* ── tasks ───────────────────────────────────────────────── */
+
+Input {
+    background: $surface;
+    border: tall $faint;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+#task-filter {
+    margin-bottom: 1;
+}
+
+#task-table {
+    height: 1fr;
+    background: $background;
+    scrollbar-size-vertical: 1;
+}
+
+#task-table > .datatable--header {
+    background: $background;
+    color: $muted;
+    text-style: bold;
+}
+
+#task-table > .datatable--cursor {
+    background: $panel;
+}
+
+#task-table:focus > .datatable--cursor {
+    background: $primary 20%;
+}
+
+#quick-add {
+    margin-top: 1;
+}
+
+/* ── modal ───────────────────────────────────────────────── */
+
+TaskModal {
+    align: center middle;
+    background: $background 60%;
+}
+
+#task-modal {
+    width: 64;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#task-modal Label {
+    color: $muted;
+    margin-top: 1;
+}
+
+#m-row {
+    height: auto;
+}
+
+#m-row > Vertical {
+    height: auto;
+    width: 1fr;
+}
+
+#m-error {
+    color: $error;
+    height: auto;
+}
+
+#m-buttons {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+#m-buttons Button {
+    margin-left: 1;
+}
+
+Footer {
+    background: $surface;
+}
+
+/* ── stats & agent ───────────────────────────────────────── */
+
+#stats-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+}
+
+#agent-status {
+    margin-bottom: 1;
+}
+
+#agent-log {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $faint;
+    scrollbar-background: $background;
+}
+
+.agent-user {
+    margin: 1 0 0 0;
+}
+
+.agent-activity {
+    height: auto;
+    color: $muted;
+}
+
+.agent-reply {
+    margin: 0 0 0 5;
+    padding: 0;
+    background: $background;
+}
+
+.agent-error {
+    margin: 0 0 0 5;
+}
+
+.agent-note {
+    background: $surface;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+#agent-input {
+    margin-top: 1;
+}
+
+/* ── brief ───────────────────────────────────────────────── */
+
+#today-brief {
+    margin-bottom: 1;
+}
+
+#brief-status {
+    margin-bottom: 1;
+}
+
+#brief-scroll {
+    height: 1fr;
+    scrollbar-size-vertical: 1;
+    scrollbar-color: $faint;
+    scrollbar-background: $background;
+}
+
+#brief-body {
+    background: $background;
+    padding: 0;
+}
+
+/* ── proposed changes ────────────────────────────────────── */
+
+.proposal {
+    height: auto;
+    margin: 1 0 0 5;
+    padding: 0 1;
+    border-left: thick $primary;
+    background: $surface;
+}
+
+.proposal-list {
+    height: auto;
+    max-height: 12;
+    background: $surface;
+    border: none;
+    padding: 0;
+}
+
+.proposal-list:focus {
+    border: none;
+}
+
+.proposal-rejected, .proposal-outcome {
+    height: auto;
+}
+
+/* ── jobs ────────────────────────────────────────────────── */
+
+#jobs-table {
+    height: 1fr;
+    background: $background;
+    scrollbar-size-vertical: 1;
+}
+
+#jobs-table > .datatable--header {
+    background: $background;
+    color: $muted;
+    text-style: bold;
+}
+
+#jobs-table:focus > .datatable--cursor {
+    background: $primary 20%;
+}
+
+#jobs-hint {
+    margin-top: 1;
+}
+
+JobModal, StagePicker {
+    align: center middle;
+    background: $background 60%;
+}
+
+#job-modal {
+    width: 76;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#job-modal Label {
+    color: $muted;
+    margin-top: 1;
+}
+
+.modal-row {
+    height: auto;
+}
+
+.modal-row > Vertical {
+    height: auto;
+    width: 1fr;
+}
+
+#j-error {
+    color: $error;
+    height: auto;
+}
+
+#j-buttons {
+    height: auto;
+    margin-top: 1;
+    align-horizontal: right;
+}
+
+#j-buttons Button {
+    margin-left: 1;
+}
+
+#stage-picker {
+    width: 44;
+    height: auto;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#stage-options {
+    height: auto;
+    background: $surface;
+    border: none;
+}
+
+JobDetail {
+    align: center middle;
+    background: $background 60%;
+}
+
+#job-detail {
+    width: 96;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: $surface;
+    border: round $primary;
+}
+
+#jd-history, #jd-emails-title {
+    margin-top: 1;
+}
+
+#jd-emails {
+    height: auto;
+    max-height: 16;
+    background: $surface;
+    border: none;
+}
+
+#jd-hint {
+    margin-top: 1;
+}
+
+#jobs-body {
+    height: 1fr;
+}
+
+#jobs-stats {
+    width: 34;
+    height: 1fr;
+    margin-left: 2;
+    padding: 0 1 0 2;
+    border-left: solid $faint;
+}
