@@ -1,0 +1,39 @@
+# --- server / notebook engine ---
+fastapi>=0.110
+uvicorn[standard]>=0.29
+jinja2>=3.1
+httpx>=0.27
+jupyter_client>=8.6
+nbformat>=5.10
+ipykernel>=6.29
+pydantic>=2.6
+
+# --- terminal UI (default `quantlab` mode) ---
+textual[syntax]>=0.80
+rich-pixels>=3.0        # inline matplotlib plots in the terminal
+lxml>=5.0               # DataFrame HTML -> aligned terminal tables
+nbconvert>=7.16         # `quantlab foo.ipynb --export html|py|md`
+
+# --- optional: native desktop window (`quantlab --desktop`) ---
+# pywebview  (also needs system webkit2gtk-4.1 + python-gobject, and a venv
+#             created with --system-site-packages)
+
+# --- quantitative research stack (imported inside the kernel) ---
+pandas>=2.0
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+seaborn>=0.13
+yfinance>=0.2.40
+pyportfolioopt>=1.5.5
+scikit-learn>=1.4
+statsmodels>=0.14
+
+# --- ML / web frameworks, and pandas-ta (imported inside the kernel) ---
+# Needs Python 3.10-3.13 — TensorFlow and pandas-ta's numba dependency don't
+# have wheels for newer Pythons yet. See README setup section.
+tensorflow>=2.16
+torch>=2.2   # install separately from the CPU index (see README) to avoid a
+             # multi-GB CUDA build on machines with no GPU
+django>=5.0
+pandas-ta>=0.4

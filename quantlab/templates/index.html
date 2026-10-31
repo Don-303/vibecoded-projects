@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuantLab — Notebook + AI Quant Reviewer</title>
+
+<!-- Vendored assets (run `python download_assets.py` once — fully offline after that) -->
+<script src="/static/vendor/tailwind.js"></script>
+<script src="/static/vendor/marked.min.js"></script>
+
+<style>
+  :root { color-scheme: dark; }
+  body { background:#0d1117; color:#c9d1d9; font-family: ui-sans-serif, system-ui, sans-serif; }
+
+  /* ---- Fallback layout (works even if Tailwind asset is missing) ---- */
+  #root { display:flex; flex-direction:column; height:100vh; }
+  #main { display:flex; flex:1; min-height:0; }
+  #notebook-panel { overflow-y:auto; min-width:300px; }
+  #chat-panel { display:flex; flex-direction:column; min-width:280px; }
+  #chat-messages { flex:1; overflow-y:auto; }
+
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb { background:#30363d; border-radius:5px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+
+  .cell { border:1px solid #21262d; border-radius:8px; margin:10px 14px; background:#0d1117; }
+  .cell.active { border-color:#1f6feb; box-shadow:0 0 0 1px #1f6feb44; }
+  .cell-toolbar { opacity:0; transition:opacity .12s; }
+  .cell:hover .cell-toolbar, .cell.active .cell-toolbar { opacity:1; }
+  .exec-count { font-family:ui-monospace,monospace; color:#3fb950; font-size:12px; min-width:64px; text-align:right; padding:10px 8px 0 0; user-select:none; white-space:nowrap; }
+  .exec-count.busy { color:#d29922; }
+  .exec-count.queued { color:#58a6ff; }
+  .editor-host { flex:1; min-width:0; border-radius:0 8px 0 0; overflow:hidden; }
+  .fallback-editor { width:100%; background:#161b22; color:#c9d1d9; border:0; outline:0; resize:vertical;
+                     font-family:ui-monospace,Menlo,monospace; font-size:13px; padding:8px; min-height:60px; }
+
+  .cell-output { border-top:1px solid #21262d; padding:8px 12px 10px 72px; font-size:13px; overflow-x:auto; }
+  .cell-output pre { font-family:ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-word; margin:2px 0; }
+  .cell-output .stderr { color:#ffa198; }
+  .cell-output img { max-width:100%; background:white; border-radius:4px; margin:4px 0; }
+  .cell-output table { border-collapse:collapse; font-size:12px; background:#161b22; }
+  .cell-output table th, .cell-output table td { border:1px solid #30363d; padding:3px 8px; }
+  .cell-output table th { background:#21262d; }
+  .error-block { background:#3d1d1f66; border:1px solid #f8514933; border-radius:6px; padding:8px; margin:4px 0; }
+  .ansi-red{color:#ff7b72}.ansi-green{color:#3fb950}.ansi-yellow{color:#d29922}.ansi-blue{color:#58a6ff}
+  .ansi-magenta{color:#bc8cff}.ansi-cyan{color:#39c5cf}.ansi-bold{font-weight:700}
+
+  .md-render { padding:12px 16px; line-height:1.6; }
+  .md-render h1,.md-render h2,.md-render h3 { font-weight:700; margin:.6em 0 .3em; border-bottom:1px solid #21262d; padding-bottom:.2em; }
+  .md-render h1{font-size:1.5em}.md-render h2{font-size:1.25em}.md-render h3{font-size:1.1em}
+  .md-render p { margin:.4em 0; } .md-render ul,.md-render ol { margin:.4em 0 .4em 1.4em; list-style:disc; }
+  .md-render ol { list-style:decimal; }
+  .md-render code { background:#161b22; padding:1px 5px; border-radius:4px; font-family:ui-monospace,monospace; font-size:.9em; }
+  .md-render pre { background:#161b22; border:1px solid #21262d; border-radius:6px; padding:10px; overflow-x:auto; margin:.5em 0; }
+  .md-render pre code { background:transparent; padding:0; }
+  .md-render a { color:#58a6ff; } .md-render blockquote { border-left:3px solid #30363d; padding-left:10px; color:#8b949e; }
+  .md-render table { border-collapse:collapse; } .md-render th,.md-render td { border:1px solid #30363d; padding:3px 8px; }
+
+  .chat-msg { border-radius:10px; padding:10px 12px; margin:8px 10px; font-size:13px; max-width:95%; }
+  .chat-user { background:#1f6feb22; border:1px solid #1f6feb44; margin-left:auto; }
+  .chat-ai { background:#161b22; border:1px solid #21262d; }
+  .code-actions { display:flex; gap:6px; justify-content:flex-end; margin:-4px 0 6px; }
+
+  .btn { background:#21262d; border:1px solid #30363d; color:#c9d1d9; border-radius:6px;
+         padding:3px 10px; font-size:12px; cursor:pointer; }
+  .btn:hover { background:#30363d; } .btn:disabled { opacity:.5; cursor:default; }
+  .btn-primary { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+  .btn-primary:hover { background:#388bfd; }
+  .btn-green { background:#238636; border-color:#2ea043; color:#fff; }
+  .btn-green:hover { background:#2ea043; }
+  .btn-danger:hover { background:#da3633; border-color:#f85149; color:#fff; }
+  .btn-icon { padding:3px 7px; }
+
+  #ask-ai-float { position:absolute; z-index:50; display:none; }
+  #resizer { width:5px; cursor:col-resize; background:#161b22; flex-shrink:0; }
+  #resizer:hover { background:#1f6feb; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:100;
+           background:#161b22; border:1px solid #30363d; padding:8px 16px; border-radius:8px;
+           display:none; font-size:13px; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .spinner { display:inline-block; width:12px; height:12px; border:2px solid #30363d;
+             border-top-color:#58a6ff; border-radius:50%; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+
+<body class="h-full">
+<div id="root">
+
+  <!-- ============ Header ============ -->
+  <header class="flex items-center gap-2 px-4 py-2" style="background:#161b22;border-bottom:1px solid #21262d;">
+    <span class="font-bold text-lg" style="color:#58a6ff;">Quant<span style="color:#3fb950;">Lab</span></span>
+    <select id="nb-select" class="btn" style="max-width:260px;"></select>
+    <button class="btn" id="btn-new" title="Create a new notebook">New</button>
+    <button class="btn btn-green" id="btn-save" title="Save notebook to disk (Ctrl+S)">&#128190; Save</button>
+    <span id="dirty-flag" class="text-xs" style="color:#d29922;display:none;">&#9679; unsaved</span>
+    <div class="flex-1"></div>
+    <button class="btn" id="btn-add-code">+ Code</button>
+    <button class="btn" id="btn-add-md">+ Markdown</button>
+    <button class="btn" id="btn-run-all" title="Run all code cells top to bottom">&#9654;&#9654; Run All</button>
+    <span style="width:14px;"></span>
+    <span class="text-xs" style="color:#8b949e;">kernel:</span>
+    <span class="dot" id="kernel-dot" style="background:#8b949e;" title="kernel status"></span>
+    <button class="btn btn-icon" id="btn-interrupt" title="Interrupt kernel">&#9632;</button>
+    <button class="btn btn-icon" id="btn-restart" title="Restart kernel">&#8635;</button>
+  </header>
+
+  <!-- ============ Main split ============ -->
+  <div id="main">
+    <!-- ============ AI Reviewer sidebar ============ -->
+    <div id="chat-panel" style="flex:1 1 38%;background:#0d1117;">
+      <div class="flex items-center gap-2 px-3 py-2" style="background:#161b22;border-bottom:1px solid #21262d;">
+        <span class="font-semibold text-sm">&#129302; Quant Reviewer</span>
+        <span class="text-xs" style="color:#8b949e;">{{ ollama_model }} @ localhost</span>
+        <div class="flex-1"></div>
+        <button class="btn btn-icon" id="btn-chat-clear" title="Clear conversation">&#128465;</button>
+      </div>
+      <div id="chat-messages">
+        <div class="chat-msg chat-ai md-render">
+          <b>Quantitative Finance Research Mentor</b> ready. Highlight code in any cell and hit
+          <i>Ask AI</i>, click <i>Fix with AI</i> on an error, or ask me anything about your research —
+          backtests, risk metrics, <code>pandas-ta</code>, <code>PyPortfolioOpt</code>, you name it.
+        </div>
+      </div>
+      <div class="p-2" style="border-top:1px solid #21262d;">
+        <div id="chat-context-chip" class="text-xs mb-1 px-2 py-1 rounded" style="background:#1f6feb22;display:none;"></div>
+        <div class="flex gap-2">
+          <textarea id="chat-input" rows="3" class="fallback-editor" style="min-height:52px;border:1px solid #30363d;border-radius:6px;"
+                    placeholder="Ask the quant mentor... (Enter to send, Shift+Enter for newline)"></textarea>
+          <button class="btn btn-primary self-end" id="btn-chat-send">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="resizer"></div>
+
+    <div id="notebook-panel" style="flex:1 1 62%;border-left:1px solid #21262d;" class="relative">
+      <div id="cells"></div>
+      <div class="text-center py-6">
+        <button class="btn" id="btn-add-end">+ Add cell at end</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<button id="ask-ai-float" class="btn btn-primary">&#10024; Ask AI</button>
+<div id="toast"></div>
+
+<script src="/static/vendor/monaco/vs/loader.js"></script>
+<script>
+"use strict";
+/* ======================================================================
+ * QuantLab frontend — notebook state, Monaco editors, rich outputs, chat
+ * ==================================================================== */
+
+const OLLAMA_MODEL = "{{ ollama_model }}";
+
+// ---------------------------- state ---------------------------------
+let nb = { path: null, cells: [] };      // cells: {id, cell_type, source, outputs, execution_count}
+let editors = {};                        // cellId -> editor (Monaco or fallback)
+let activeCellId = null;
+let dirty = false;
+let cellSeq = 0;
+let monacoReady = null;                  // Promise resolving true (monaco) / false (fallback)
+let chatHistory = [];                    // [{role, content}] sent to backend
+let chatBusy = false;
+let aiContext = null;                    // {cellId, selection|null} — target for "Apply to Cell"
+
+const $ = (id) => document.getElementById(id);
+const cellsEl = $("cells");
+
+function uid() { return "cell-" + (++cellSeq); }
+function setDirty(v) { dirty = v; $("dirty-flag").style.display = v ? "" : "none"; }
+function toast(msg, ms = 2500) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", ms);
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------------------- markdown + ANSI rendering --------------------
+function renderMarkdown(src) {
+  if (window.marked) {
+    try { return marked.parse(src, { gfm: true, breaks: true }); } catch (e) { /* fall through */ }
+  }
+  return "<pre>" + escapeHtml(src) + "</pre>";
+}
+
+const ANSI_COLORS = { 30:"", 31:"ansi-red", 32:"ansi-green", 33:"ansi-yellow", 34:"ansi-blue",
+                      35:"ansi-magenta", 36:"ansi-cyan", 37:"", 90:"", 91:"ansi-red", 92:"ansi-green",
+                      93:"ansi-yellow", 94:"ansi-blue", 95:"ansi-magenta", 96:"ansi-cyan", 97:"" };
+function ansiToHtml(text) {
+  let out = "", open = false;
+  const parts = String(text).split(/\x1b\[([0-9;]*)m/);
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) { out += escapeHtml(parts[i]); continue; }
+    if (open) { out += "</span>"; open = false; }
+    const codes = parts[i].split(";").map(Number);
+    const cls = codes.map(c => c === 1 ? "ansi-bold" : (ANSI_COLORS[c] || "")).filter(Boolean).join(" ");
+    if (cls) { out += `<span class="${cls}">`; open = true; }
+  }
+  return out + (open ? "</span>" : "");
+}
+function stripAnsi(text) { return String(text).replace(/\x1b\[[0-9;]*m/g, ""); }
+
+// ------------------------- Monaco bootstrap --------------------------
+function initMonaco() {
+  monacoReady = new Promise((resolve) => {
+    if (typeof require === "undefined" || !require.config) { resolve(false); return; }
+    require.config({ paths: { vs: "/static/vendor/monaco/vs" } });
+    let settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; resolve(false); } }, 8000);
+    try {
+      require(["vs/editor/editor.main"], () => {
+        if (settled) return; settled = true; clearTimeout(timer);
+        monaco.editor.defineTheme("quantlab", {
+          base: "vs-dark", inherit: true, rules: [],
+          colors: { "editor.background": "#161b22" }
+        });
+        resolve(true);
+      }, () => { if (!settled) { settled = true; clearTimeout(timer); resolve(false); } });
+    } catch (e) { if (!settled) { settled = true; clearTimeout(timer); resolve(false); } }
+  });
+  return monacoReady;
+}
+
+// Minimal drop-in replacement when Monaco assets aren't vendored yet.
+class FallbackEditor {
+  constructor(host, value, onChange, onRun) {
+    this.ta = document.createElement("textarea");
+    this.ta.className = "fallback-editor";
+    this.ta.value = value;
+    this.ta.rows = Math.max(3, value.split("\n").length + 1);
+    this.ta.addEventListener("input", () => { this.ta.rows = Math.max(3, this.ta.value.split("\n").length + 1); onChange(); });
+    this.ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.shiftKey || e.ctrlKey)) { e.preventDefault(); onRun(e.shiftKey); }
+    });
+    host.appendChild(this.ta);
+  }
+  getValue() { return this.ta.value; }
+  setValue(v) { this.ta.value = v; this.ta.rows = Math.max(3, v.split("\n").length + 1); }
+  focus() { this.ta.focus(); }
+  getSelectionText() {
+    return this.ta.value.substring(this.ta.selectionStart, this.ta.selectionEnd);
+  }
+  replaceSelectionOrAll(text, selOnly) {
+    if (selOnly && this.ta.selectionStart !== this.ta.selectionEnd) {
+      const v = this.ta.value;
+      this.setValue(v.slice(0, this.ta.selectionStart) + text + v.slice(this.ta.selectionEnd));
+    } else this.setValue(text);
+  }
+  dispose() { this.ta.remove(); }
+}
+
+async function createEditor(host, cell) {
+  const useMonaco = await monacoReady;
+  const onChange = () => { cell.source = editors[cell.id].getValue(); setDirty(true); };
+  const onRun = (advance) => runCell(cell.id, advance);
+
+  if (!useMonaco) return new FallbackEditor(host, cell.source, onChange, onRun);
+
+  const ed = monaco.editor.create(host, {
+    value: cell.source,
+    language: cell.cell_type === "markdown" ? "markdown" : "python",
+    theme: "quantlab",
+    minimap: { enabled: false },
+    lineNumbers: "on",
+    fontSize: 13,
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    scrollbar: { vertical: "hidden", alwaysConsumeMouseWheel: false },
+    overviewRulerLanes: 0,
+    padding: { top: 8, bottom: 8 },
+    wordWrap: "on",
+  });
+
+  // Auto-grow editor to fit content.
+  const grow = () => {
+    const h = Math.min(Math.max(ed.getContentHeight(), 44), 800);
+    host.style.height = h + "px";
+    ed.layout();
+  };
+  ed.onDidContentSizeChange(grow); grow();
+
+  ed.onDidChangeModelContent(onChange);
+  ed.onDidFocusEditorWidget(() => setActiveCell(cell.id));
+  ed.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => onRun(true));
+  ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRun(false));
+
+  // Floating "Ask AI" button on selection.
+  ed.onDidChangeCursorSelection((e) => {
+    const sel = e.selection;
+    const float = $("ask-ai-float");
+    if (sel.isEmpty()) { float.style.display = "none"; return; }
+    const pos = ed.getScrolledVisiblePosition(sel.getEndPosition());
+    if (!pos) { float.style.display = "none"; return; }
+    const rect = ed.getDomNode().getBoundingClientRect();
+    float.style.left = Math.min(rect.left + pos.left + 8, window.innerWidth - 110) + "px";
+    float.style.top = (rect.top + pos.top + 22) + "px";
+    float.style.display = "block";
+    float._context = { cellId: cell.id, selection: sel };
+  });
+
+  // Convenience monkey-patches so Monaco and FallbackEditor share an API.
+  ed.getSelectionText = () => ed.getModel().getValueInRange(ed.getSelection());
+  ed.replaceSelectionOrAll = (text, selOnly) => {
+    const sel = ed.getSelection();
+    if (selOnly && sel && !sel.isEmpty()) {
+      ed.executeEdits("ai-apply", [{ range: sel, text, forceMoveMarkers: true }]);
+    } else ed.setValue(text);
+  };
+  return ed;
+}
+
+// -------------------------- cell rendering ---------------------------
+function cellIndex(cellId) { return nb.cells.findIndex(c => c.id === cellId); }
+
+function setActiveCell(cellId) {
+  activeCellId = cellId;
+  document.querySelectorAll(".cell").forEach(el => el.classList.toggle("active", el.dataset.cellId === cellId));
+}
+
+function execLabel(cell) {
+  if (cell._running) return "In [*]:";
+  if (cell._queued) return "In [⋯]:";
+  return cell.cell_type === "code" ? `In [${cell.execution_count ?? " "}]:` : "";
+}
+
+function updateGutter(cell) {
+  if (!cell._gutterEl) return;
+  cell._gutterEl.textContent = execLabel(cell);
+  cell._gutterEl.classList.toggle("busy", !!cell._running);
+  cell._gutterEl.classList.toggle("queued", !!cell._queued && !cell._running);
+}
+
+async function renderCell(cell, insertBeforeEl = null) {
+  const el = document.createElement("div");
+  el.className = "cell";
+  el.dataset.cellId = cell.id;
+  el.addEventListener("mousedown", () => setActiveCell(cell.id));
+
+  // toolbar
+  const tb = document.createElement("div");
+  tb.className = "cell-toolbar flex gap-1 justify-end px-2 pt-1";
+  tb.innerHTML = `
+    ${cell.cell_type === "code" ? '<button class="btn btn-icon" data-act="run" title="Run (Shift+Enter)">&#9654;</button>' : ''}
+    <button class="btn btn-icon" data-act="up" title="Move up">&#8593;</button>
+    <button class="btn btn-icon" data-act="down" title="Move down">&#8595;</button>
+    <button class="btn btn-icon" data-act="add" title="Add code cell below">+</button>
+    <button class="btn btn-icon" data-act="type" title="Toggle code/markdown">${cell.cell_type === "code" ? "M&#8595;" : "&lt;/&gt;"}</button>
+    ${cell.cell_type === "code" ? '<button class="btn btn-icon" data-act="clear" title="Clear outputs">&#8709;</button>' : ''}
+    <button class="btn btn-icon btn-danger" data-act="del" title="Delete cell">&#10005;</button>`;
+  tb.addEventListener("click", (e) => {
+    const act = e.target.closest("button")?.dataset.act;
+    if (!act) return;
+    if (act === "run") runCell(cell.id, false);
+    if (act === "up") moveCell(cell.id, -1);
+    if (act === "down") moveCell(cell.id, +1);
+    if (act === "add") addCell("code", cellIndex(cell.id) + 1);
+    if (act === "del") deleteCell(cell.id);
+    if (act === "clear") { cell.outputs = []; renderOutputs(cell); setDirty(true); }
+    if (act === "type") toggleCellType(cell.id);
+  });
+  el.appendChild(tb);
+
+  if (cell.cell_type === "markdown") {
+    const md = document.createElement("div");
+    md.className = "md-render";
+    md.innerHTML = renderMarkdown(cell.source || "*empty markdown cell — double-click to edit*");
+    md.title = "Double-click to edit";
+    const editHost = document.createElement("div");
+    editHost.className = "editor-host";
+    editHost.style.display = "none";
+    el.appendChild(md); el.appendChild(editHost);
+
+    let editing = false;
+    md.addEventListener("dblclick", async () => {
+      if (editing) return; editing = true;
+      md.style.display = "none"; editHost.style.display = "";
+      if (!editors[cell.id]) editors[cell.id] = await createEditor(editHost, cell);
+      else editors[cell.id].setValue(cell.source);
+      editors[cell.id].focus();
+    });
+    // Shift+Enter inside a markdown editor re-renders it:
+    cell._renderMd = () => {
+      cell.source = editors[cell.id] ? editors[cell.id].getValue() : cell.source;
+      md.innerHTML = renderMarkdown(cell.source || "*empty markdown cell*");
+      md.style.display = ""; editHost.style.display = "none"; editing = false;
+    };
+  } else {
+    const row = document.createElement("div");
+    row.className = "flex";
+    const gutter = document.createElement("div");
+    gutter.className = "exec-count";
+    gutter.textContent = execLabel(cell);
+    const host = document.createElement("div");
+    host.className = "editor-host";
+    row.appendChild(gutter); row.appendChild(host);
+    el.appendChild(row);
+
+    const outEl = document.createElement("div");
+    outEl.className = "cell-output";
+    outEl.style.display = "none";
+    el.appendChild(outEl);
+
+    cell._gutterEl = gutter;
+    cell._outputEl = outEl;
+    editors[cell.id] = await createEditor(host, cell);
+    renderOutputs(cell);
+  }
+
+  if (insertBeforeEl) cellsEl.insertBefore(el, insertBeforeEl);
+  else cellsEl.appendChild(el);
+  cell._el = el;
+  return el;
+}
+
+function renderOutputs(cell) {
+  const outEl = cell._outputEl;
+  if (!outEl) return;
+  updateGutter(cell);
+  if (!cell.outputs || cell.outputs.length === 0) { outEl.style.display = "none"; outEl.innerHTML = ""; return; }
+  outEl.style.display = "";
+  outEl.innerHTML = "";
+
+  for (const out of cell.outputs) {
+    const t = out.output_type;
+    if (t === "stream") {
+      const pre = document.createElement("pre");
+      if (out.name === "stderr") pre.className = "stderr";
+      pre.innerHTML = ansiToHtml(Array.isArray(out.text) ? out.text.join("") : out.text);
+      outEl.appendChild(pre);
+    } else if (t === "execute_result" || t === "display_data") {
+      const data = out.data || {};
+      if (data["image/png"]) {
+        const img = document.createElement("img");
+        const b64 = Array.isArray(data["image/png"]) ? data["image/png"].join("") : data["image/png"];
+        img.src = "data:image/png;base64," + b64.replace(/\n/g, "");
+        outEl.appendChild(img);
+      } else if (data["text/html"]) {
+        const div = document.createElement("div");
+        div.innerHTML = Array.isArray(data["text/html"]) ? data["text/html"].join("") : data["text/html"];
+        outEl.appendChild(div);
+      } else if (data["text/plain"]) {
+        const pre = document.createElement("pre");
+        pre.innerHTML = ansiToHtml(Array.isArray(data["text/plain"]) ? data["text/plain"].join("") : data["text/plain"]);
+        outEl.appendChild(pre);
+      }
+    } else if (t === "error") {
+      const div = document.createElement("div");
+      div.className = "error-block";
+      const tb = Array.isArray(out.traceback) ? out.traceback.join("\n") : String(out.traceback || "");
+      div.innerHTML = `
+        <div class="flex items-center gap-2 mb-1">
+          <b class="ansi-red">${escapeHtml(out.ename || "Error")}</b>
+          <span class="text-xs" style="color:#8b949e;">${escapeHtml(out.evalue || "")}</span>
+          <div class="flex-1"></div>
+          <button class="btn btn-primary btn-icon fix-ai-btn">&#129302; Fix with AI</button>
+        </div>
+        <pre>${ansiToHtml(tb)}</pre>`;
+      div.querySelector(".fix-ai-btn").addEventListener("click", () => fixWithAI(cell, out));
+      outEl.appendChild(div);
+    }
+  }
+}
+
+// ------------------------- cell CRUD ---------------------------------
+async function addCell(type, index) {
+  const cell = { id: uid(), cell_type: type, source: "", outputs: [], execution_count: null };
+  if (index === undefined || index < 0 || index > nb.cells.length) index = nb.cells.length;
+  const beforeEl = index < nb.cells.length ? nb.cells[index]._el : null;
+  nb.cells.splice(index, 0, cell);
+  await renderCell(cell, beforeEl);
+  setActiveCell(cell.id);
+  setDirty(true);
+  if (editors[cell.id]) editors[cell.id].focus();
+  return cell;
+}
+
+function deleteCell(cellId) {
+  const i = cellIndex(cellId);
+  if (i < 0) return;
+  const cell = nb.cells[i];
+  if (editors[cellId]) { try { editors[cellId].dispose(); } catch (e) {} delete editors[cellId]; }
+  cell._el.remove();
+  nb.cells.splice(i, 1);
+  setDirty(true);
+  if (nb.cells.length === 0) addCell("code", 0);
+  else setActiveCell(nb.cells[Math.min(i, nb.cells.length - 1)].id);
+}
+
+function moveCell(cellId, delta) {
+  const i = cellIndex(cellId);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= nb.cells.length) return;
+  const cell = nb.cells[i];
+  nb.cells.splice(i, 1); nb.cells.splice(j, 0, cell);
+  cell._el.remove();
+  const beforeEl = (j + 1 < nb.cells.length) ? nb.cells[j + 1]._el : null;
+  if (beforeEl) cellsEl.insertBefore(cell._el, beforeEl); else cellsEl.appendChild(cell._el);
+  setDirty(true);
+}
+
+async function toggleCellType(cellId) {
+  const i = cellIndex(cellId);
+  if (i < 0) return;
+  const old = nb.cells[i];
+  const src = editors[cellId] ? editors[cellId].getValue() : old.source;
+  const fresh = { id: uid(), cell_type: old.cell_type === "code" ? "markdown" : "code",
+                  source: src, outputs: [], execution_count: null };
+  const beforeEl = old._el.nextSibling;
+  deleteCellSilently(i);
+  nb.cells.splice(i, 0, fresh);
+  await renderCell(fresh, beforeEl);
+  setActiveCell(fresh.id);
+  setDirty(true);
+}
+function deleteCellSilently(i) {
+  const cell = nb.cells[i];
+  if (editors[cell.id]) { try { editors[cell.id].dispose(); } catch (e) {} delete editors[cell.id]; }
+  cell._el.remove();
+  nb.cells.splice(i, 1);
+}
+
+// ------------------------- execution ---------------------------------
+async function runCell(cellId, advance) {
+  const i = cellIndex(cellId);
+  if (i < 0) return;
+  const cell = nb.cells[i];
+
+  if (cell.cell_type === "markdown") {
+    if (cell._renderMd) cell._renderMd();
+    if (advance) focusNext(i);
+    return;
+  }
+  if (cell._running) return;
+  cell.source = editors[cellId] ? editors[cellId].getValue() : cell.source;
+  cell._running = true;
+  cell.outputs = [];
+  renderOutputs(cell);
+
+  try {
+    const resp = await fetch("/api/execute", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: cell.source }),
+    });
+    if (!resp.ok) {
+      const detail = (await resp.json().catch(() => ({}))).detail || resp.statusText;
+      cell.outputs = [{ output_type: "error", ename: "ServerError", evalue: detail, traceback: [detail] }];
+    } else {
+      const result = await resp.json();
+      cell.execution_count = result.execution_count;
+      cell.outputs = result.outputs;
+    }
+  } catch (e) {
+    cell.outputs = [{ output_type: "error", ename: "NetworkError", evalue: String(e), traceback: [String(e)] }];
+  } finally {
+    cell._running = false;
+    renderOutputs(cell);
+    setDirty(true);
+    refreshKernelStatus();
+  }
+  if (advance) focusNext(i);
+}
+
+function focusNext(i) {
+  if (i + 1 >= nb.cells.length) { addCell("code", nb.cells.length); return; }
+  const next = nb.cells[i + 1];
+  setActiveCell(next.id);
+  if (editors[next.id]) editors[next.id].focus();
+  next._el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+async function runAll() {
+  const codeCells = nb.cells.filter(c => c.cell_type === "code");
+  codeCells.forEach(c => { c._queued = true; updateGutter(c); });
+  for (const cell of codeCells) {
+    cell._queued = false;
+    await runCell(cell.id, false);
+  }
+  toast("Run All complete");
+}
+
+// ---------------------- notebook load/save ---------------------------
+async function refreshNotebookList(selectPath) {
+  const data = await (await fetch("/api/notebooks")).json();
+  const sel = $("nb-select");
+  sel.innerHTML = "";
+  for (const p of data.notebooks) {
+    const opt = document.createElement("option");
+    opt.value = p; opt.textContent = p;
+    sel.appendChild(opt);
+  }
+  if (selectPath) sel.value = selectPath;
+  return data.notebooks;
+}
+
+async function loadNotebook(path) {
+  const resp = await fetch("/api/notebook?path=" + encodeURIComponent(path));
+  if (!resp.ok) { toast("Failed to load: " + path); return; }
+  const data = await resp.json();
+
+  // teardown
+  for (const id of Object.keys(editors)) { try { editors[id].dispose(); } catch (e) {} }
+  editors = {}; cellsEl.innerHTML = "";
+
+  nb = { path: data.path, cells: [] };
+  for (const raw of data.cells) {
+    const cell = { id: uid(), cell_type: raw.cell_type, source: raw.source,
+                   outputs: raw.outputs || [], execution_count: raw.execution_count ?? null };
+    nb.cells.push(cell);
+    await renderCell(cell);
+  }
+  if (nb.cells.length === 0) await addCell("code", 0);
+
+  chatHistory = data.chat || [];
+  aiContext = null;
+  setChatContext(null);
+  replayChatHistory(chatHistory);
+
+  setDirty(false);
+  toast("Loaded " + path);
+}
+
+async function saveNotebook() {
+  if (!nb.path) return;
+  // flush editor buffers into the model
+  for (const cell of nb.cells) {
+    if (editors[cell.id]) cell.source = editors[cell.id].getValue();
+  }
+  const cells = nb.cells.map(c => ({
+    cell_type: c.cell_type, source: c.source,
+    outputs: c.cell_type === "code" ? (c.outputs || []) : undefined,
+    execution_count: c.cell_type === "code" ? c.execution_count : undefined,
+  }));
+  const resp = await fetch("/api/notebook/save", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: nb.path, cells, chat: chatHistory }),
+  });
+  if (resp.ok) { setDirty(false); toast("Saved " + nb.path); }
+  else toast("Save failed: " + ((await resp.json().catch(() => ({}))).detail || resp.statusText));
+}
+
+// ------------------------- kernel controls ---------------------------
+async function refreshKernelStatus() {
+  try {
+    const s = await (await fetch("/api/kernel/status")).json();
+    $("kernel-dot").style.background = s.alive ? "#3fb950" : "#f85149";
+    $("kernel-dot").title = s.alive ? "kernel alive (" + s.kernel_name + ")" : "kernel dead — click restart";
+  } catch (e) { $("kernel-dot").style.background = "#8b949e"; }
+}
+
+// --------------------------- AI chat ---------------------------------
+function setChatContext(text) {
+  const chip = $("chat-context-chip");
+  if (text) { chip.textContent = "context: " + text; chip.style.display = ""; }
+  else { chip.style.display = "none"; chip.textContent = ""; }
+}
+
+function appendChatMessage(role, html) {
+  const div = document.createElement("div");
+  div.className = "chat-msg md-render " + (role === "user" ? "chat-user" : "chat-ai");
+  div.innerHTML = html;
+  $("chat-messages").appendChild(div);
+  $("chat-messages").scrollTop = $("chat-messages").scrollHeight;
+  return div;
+}
+
+// Attach "Apply to Cell" / "Copy" buttons to code blocks in an AI message.
+function decorateCodeBlocks(msgEl) {
+  msgEl.querySelectorAll("pre").forEach((pre) => {
+    if (pre._decorated) return;
+    pre._decorated = true;
+    const code = pre.querySelector("code") ? pre.querySelector("code").textContent : pre.textContent;
+    const bar = document.createElement("div");
+    bar.className = "code-actions";
+    const applyBtn = document.createElement("button");
+    applyBtn.className = "btn btn-green btn-icon";
+    applyBtn.textContent = "⇤ Apply to Cell";
+    applyBtn.title = aiContext && aiContext.selection
+      ? "Replace the selected text in cell " + (cellIndex(aiContext.cellId) + 1)
+      : "Replace the active cell's content";
+    applyBtn.addEventListener("click", () => applySuggestion(code));
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "btn btn-icon";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(code); toast("Copied"); }
+      catch (e) { toast("Clipboard unavailable"); }
+    });
+    bar.appendChild(applyBtn); bar.appendChild(copyBtn);
+    pre.parentNode.insertBefore(bar, pre.nextSibling);
+  });
+}
+
+// Restore a notebook's saved AI conversation into the sidebar.
+function replayChatHistory(history) {
+  $("chat-messages").innerHTML = "";
+  if (!history || history.length === 0) {
+    appendChatMessage("assistant",
+      "<b>Quantitative Finance Research Mentor</b> ready. Highlight code in any cell and hit " +
+      "<i>Ask AI</i>, click <i>Fix with AI</i> on an error, or ask me anything about your research — " +
+      "backtests, risk metrics, <code>pandas-ta</code>, <code>PyPortfolioOpt</code>, you name it.");
+    return;
+  }
+  for (const m of history) {
+    const el = appendChatMessage(m.role, renderMarkdown(m.content));
+    if (m.role === "assistant") decorateCodeBlocks(el);
+  }
+}
+
+function applySuggestion(code) {
+  code = code.replace(/\n$/, "");
+  let target = aiContext && cellIndex(aiContext.cellId) >= 0 ? aiContext.cellId : activeCellId;
+  if (!target || cellIndex(target) < 0) { toast("No target cell — click a cell first"); return; }
+  const ed = editors[target];
+  const cell = nb.cells[cellIndex(target)];
+  if (ed) {
+    // If the context carried a selection, try a surgical replacement of that
+    // exact text; otherwise replace the entire cell.
+    if (aiContext && aiContext.cellId === target && aiContext.selectionText) {
+      const cur = ed.getValue();
+      if (cur.includes(aiContext.selectionText)) {
+        ed.setValue(cur.replace(aiContext.selectionText, code));
+      } else ed.setValue(code);
+    } else ed.setValue(code);
+    cell.source = ed.getValue();
+  } else cell.source = code;
+  setDirty(true);
+  setActiveCell(target);
+  cell._el.scrollIntoView({ block: "center", behavior: "smooth" });
+  toast("Applied to cell " + (cellIndex(target) + 1));
+}
+
+async function sendChat(userText) {
+  if (chatBusy || !userText.trim()) return;
+  chatBusy = true;
+  $("btn-chat-send").disabled = true;
+
+  appendChatMessage("user", renderMarkdown(userText));
+  chatHistory.push({ role: "user", content: userText });
+
+  const aiEl = appendChatMessage("assistant", '<span class="spinner"></span>');
+  let acc = "";
+  try {
+    // include the live notebook so the mentor can read every cell + output
+    for (const c of nb.cells) { if (editors[c.id]) c.source = editors[c.id].getValue(); }
+    // slim outputs: drop image base64 + html (the model only reads text) so
+    // plot-heavy notebooks don't ship megabytes with every chat message
+    const slimOutputs = (outs) => (outs || []).map(o => {
+      if ((o.output_type === "execute_result" || o.output_type === "display_data") && o.data) {
+        const d = { ...o.data };
+        if (d["image/png"]) d["image/png"] = "";   // empty marker → "figure rendered"
+        delete d["text/html"];
+        return { ...o, data: d };
+      }
+      return o;
+    });
+    const cellsCtx = nb.cells.map(c => ({
+      cell_type: c.cell_type, source: c.source,
+      execution_count: c.execution_count, outputs: slimOutputs(c.outputs),
+    }));
+    const resp = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: chatHistory, cells: cellsCtx }),
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "", lastRender = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let obj;
+        try { obj = JSON.parse(line); } catch (e) { continue; }
+        if (obj.error) { acc += "\n\n> ⚠️ **" + obj.error + "**"; }
+        else if (obj.message && obj.message.content) acc += obj.message.content;
+        const now = Date.now();
+        if (now - lastRender > 120) { // throttle markdown re-render while streaming
+          aiEl.innerHTML = renderMarkdown(acc);
+          $("chat-messages").scrollTop = $("chat-messages").scrollHeight;
+          lastRender = now;
+        }
+      }
+    }
+  } catch (e) {
+    acc += "\n\n> ⚠️ **Chat request failed: " + escapeHtml(String(e)) + "**";
+  }
+  aiEl.innerHTML = renderMarkdown(acc || "_(empty response)_");
+  decorateCodeBlocks(aiEl);
+  $("chat-messages").scrollTop = $("chat-messages").scrollHeight;
+  chatHistory.push({ role: "assistant", content: acc });
+  // keep the conversation bounded so the local model's context doesn't blow up
+  if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
+  chatBusy = false;
+  $("btn-chat-send").disabled = false;
+}
+
+// -------- AI entry points: Ask AI (selection) & Fix with AI ----------
+function askAIFromSelection(ctx) {
+  const ed = editors[ctx.cellId];
+  if (!ed) return;
+  const selText = ed.getSelectionText ? ed.getSelectionText() : "";
+  if (!selText.trim()) return;
+  const idx = cellIndex(ctx.cellId) + 1;
+  aiContext = { cellId: ctx.cellId, selectionText: selText };
+  setChatContext(`cell ${idx} — ${selText.split("\n").length} selected line(s)`);
+  const input = $("chat-input");
+  input.value = `Regarding this snippet from cell ${idx} of my notebook:\n\n\`\`\`python\n${selText}\n\`\`\`\n\n`;
+  input.focus();
+  input.selectionStart = input.selectionEnd = input.value.length;
+  $("ask-ai-float").style.display = "none";
+}
+
+function fixWithAI(cell, errOut) {
+  const idx = cellIndex(cell.id) + 1;
+  const code = editors[cell.id] ? editors[cell.id].getValue() : cell.source;
+  const tb = stripAnsi(Array.isArray(errOut.traceback) ? errOut.traceback.join("\n") : String(errOut.traceback || ""));
+  aiContext = { cellId: cell.id, selectionText: null };
+  setChatContext(`cell ${idx} — ${errOut.ename}`);
+  const prompt =
+`Cell ${idx} of my notebook failed with \`${errOut.ename}: ${errOut.evalue}\`.
+
+Cell code:
+\`\`\`python
+${code}
+\`\`\`
+
+Full traceback:
+\`\`\`
+${tb}
+\`\`\`
+
+Diagnose the root cause and give me a corrected drop-in replacement for the whole cell.`;
+  sendChat(prompt);
+}
+
+// --------------------------- wiring ----------------------------------
+function wireUI() {
+  $("btn-save").addEventListener("click", saveNotebook);
+  $("btn-add-code").addEventListener("click", () => addCell("code", cellIndex(activeCellId) + 1 || nb.cells.length));
+  $("btn-add-md").addEventListener("click", () => addCell("markdown", cellIndex(activeCellId) + 1 || nb.cells.length));
+  $("btn-add-end").addEventListener("click", () => addCell("code", nb.cells.length));
+  $("btn-run-all").addEventListener("click", runAll);
+  $("btn-restart").addEventListener("click", async () => {
+    toast("Restarting kernel…");
+    await fetch("/api/kernel/restart", { method: "POST" });
+    await refreshKernelStatus();
+    toast("Kernel restarted — state cleared");
+  });
+  $("btn-interrupt").addEventListener("click", () => fetch("/api/kernel/interrupt", { method: "POST" }));
+  $("btn-new").addEventListener("click", async () => {
+    const name = prompt("New notebook name (e.g. research.ipynb):");
+    if (!name) return;
+    const resp = await fetch("/api/notebooks/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!resp.ok) { toast("Create failed: " + ((await resp.json().catch(() => ({}))).detail || "")); return; }
+    const { path } = await resp.json();
+    await refreshNotebookList(path);
+    await loadNotebook(path);
+  });
+  $("nb-select").addEventListener("change", async (e) => {
+    if (dirty && !confirm("Discard unsaved changes?")) { e.target.value = nb.path; return; }
+    await loadNotebook(e.target.value);
+  });
+
+  // chat
+  $("btn-chat-send").addEventListener("click", () => {
+    const v = $("chat-input").value; $("chat-input").value = "";
+    setChatContext(null);
+    sendChat(v);
+  });
+  $("chat-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const v = $("chat-input").value; $("chat-input").value = "";
+      setChatContext(null);
+      sendChat(v);
+    }
+  });
+  $("btn-chat-clear").addEventListener("click", () => {
+    chatHistory = []; aiContext = null; setChatContext(null);
+    $("chat-messages").innerHTML = "";
+    appendChatMessage("assistant", "Conversation cleared. What are we researching?");
+  });
+
+  // floating Ask AI
+  const float = $("ask-ai-float");
+  float.addEventListener("mousedown", (e) => e.preventDefault()); // keep editor selection
+  float.addEventListener("click", () => { if (float._context) askAIFromSelection(float._context); });
+  document.addEventListener("mousedown", (e) => {
+    if (e.target !== float && !float.contains(e.target)) float.style.display = "none";
+  });
+
+  // global shortcuts
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveNotebook(); }
+  });
+  window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+  // panel resizer (chat panel is now on the left, notebook on the right)
+  const resizer = $("resizer"), left = $("chat-panel"), right = $("notebook-panel");
+  resizer.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    const move = (ev) => {
+      const total = $("main").clientWidth;
+      const leftW = Math.min(Math.max(ev.clientX, 320), total - 300);
+      left.style.flex = `0 0 ${leftW}px`;
+      right.style.flex = "1 1 auto";
+    };
+    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
+// --------------------------- bootstrap -------------------------------
+(async function main() {
+  initMonaco();
+  wireUI();
+  const usingMonaco = await monacoReady;
+  if (!usingMonaco) toast("Monaco assets missing — using plain-text editors. Run: python download_assets.py", 6000);
+  const notebooks = await refreshNotebookList();
+  if (notebooks.length > 0) await loadNotebook(notebooks[0]);
+  else {
+    const resp = await fetch("/api/notebooks/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "untitled.ipynb" }),
+    });
+    if (resp.ok) { const { path } = await resp.json(); await refreshNotebookList(path); await loadNotebook(path); }
+  }
+  refreshKernelStatus();
+  setInterval(refreshKernelStatus, 15000);
+})();
+</script>
+</body>
+</html>

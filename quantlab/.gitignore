@@ -1,0 +1,20 @@
+# virtualenvs
+.venv/
+.venv*/
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# vendored frontend assets (re-fetch with: python download_assets.py)
+static/vendor/
+
+# bundled market data (re-fetch with: python download_data.py)
+data/*.csv
+
+# notebook checkpoints & exports
+notebooks/.ipynb_checkpoints/
+notebooks/*.html
+notebooks/*.py
+notebooks/*.md
