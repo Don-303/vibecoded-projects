@@ -1,0 +1,318 @@
+modules:
+  - id: python-foundations
+    title: "Python Foundations for Quant Work"
+    lessons:
+      - id: py-core
+        title: "Python core: types, control flow, functions, comprehensions"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture02-Introduction-to-Python.ipynb}
+      - id: py-numpy
+        title: "NumPy: arrays, vectorization, broadcasting"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture03-Introduction-to-NumPy.ipynb}
+      - id: py-pandas
+        title: "Pandas: Series/DataFrame, indexing, time series"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture04-Introduction-to-Pandas.ipynb}
+          - {repo: quantecon-lecture-datascience, file: basics.md}
+          - {repo: quantecon-lecture-datascience, file: timeseries.md}
+      - id: py-viz
+        title: "Visualization: matplotlib basics for price/return series"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture05-Plotting-Data.ipynb}
+
+  - id: math-foundations
+    title: "Math Foundations for Quant Finance"
+    lessons:
+      - id: mth-linalg
+        title: "Linear algebra: matrix ops, eigenvalues/eigenvectors, PCA"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture36-PCA.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture26-Estimating-Covariance-Matrices.ipynb}
+          - {repo: quantecon-lecture-python-intro, file: eigen_I.md}
+      - id: mth-prob
+        title: "Probability & stochastic processes: Brownian motion, Markov chains"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture11-Random-Variables.ipynb}
+          - {repo: quantecon-lecture-python-intro, file: markov_chains_I.md}
+          - {repo: quantecon-lecture-python-intro, file: monte_carlo.md}
+      - id: mth-calc
+        title: "Stochastic calculus intuition: Ito's lemma (conceptual)"
+      - id: mth-optim
+        title: "Optimization: convex optimization and Lagrange multipliers"
+        sources:
+          - {repo: quantecon-lecture-python-intro, file: lp_intro.md}
+          - {repo: msc-cf969, file: Lab3 - Optimisation.ipynb}
+
+  - id: stats-foundations
+    title: "Statistics & Probability Foundations"
+    lessons:
+      - id: st-descriptive
+        title: "Descriptive statistics and probability distributions"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture06-Means.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture07-Variance.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture08-Statistical-Moments.ipynb}
+      - id: st-hypothesis
+        title: "Hypothesis testing and confidence intervals"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture20-Hypothesis-Testing.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture21-Confidence-Intervals.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture23-p-Hacking-and-Multiple-Comparisons-Bias.ipynb}
+      - id: st-ols
+        title: "Linear regression (OLS) from scratch and with statsmodels"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture12-Linear-Regression.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture13-Maximum-Likelihood-Estimation.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture15-Multiple-Linear-Regression.ipynb}
+      - id: st-stationarity
+        title: "Correlation vs causation; intro to stationarity"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture09-Linear-Correlation-Analysis.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture10-Instability-of-Estimates.ipynb}
+
+  - id: ml-foundations
+    title: "Machine Learning Foundations"
+    lessons:
+      - id: ml-traintest
+        title: "Train/test split, cross-validation, overfitting"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture19-Dangers-of-Overfitting.ipynb}
+          - {repo: msc-cf969, file: Lab6b - Regression and Cross-Validation Importance.ipynb}
+      - id: ml-bias-variance
+        title: "Bias-variance tradeoff and model complexity"
+      - id: ml-regression
+        title: "Regularized regression: Ridge, Lasso, Elastic Net"
+        sources:
+          - {repo: msc-cf969, file: Lab 6 - Regression.ipynb}
+      - id: ml-classification
+        title: "Classification: logistic regression, trees, random forest"
+        sources:
+          - {repo: msc-cf969, file: Lab 7 - Decision Trees and Random Forests.ipynb}
+      - id: ml-bayesian
+        title: "Bayesian learning and naive Bayes"
+      - id: ml-knn
+        title: "Instance-based learning: k-Nearest Neighbors"
+      - id: ml-svm
+        title: "Support Vector Machines"
+      - id: ml-clustering
+        title: "Unsupervised learning: k-means and hierarchical clustering"
+      - id: ml-ensembles
+        title: "Ensemble methods: bagging, boosting, multiple models"
+      - id: ml-eval
+        title: "Model evaluation metrics (finance-relevant: not just accuracy)"
+      - id: ml-reinforcement
+        title: "Reinforcement learning fundamentals and trading applications"
+
+  - id: neural-networks
+    title: "Neural Networks & Deep Learning"
+    lessons:
+      - id: nn-gradient-descent
+        title: "Differentiation basics and gradient descent"
+      - id: nn-perceptron
+        title: "The perceptron and the XOR problem"
+      - id: nn-pytorch
+        title: "PyTorch fundamentals: tensors, autograd, and training with nn.Module"
+      - id: nn-mlp-backprop
+        title: "Multi-layer perceptrons and backpropagation"
+        sources:
+          - {repo: msc-cf969, file: Lab 8 - Building a Neural Network.ipynb}
+          - {repo: msc-cf969, file: Lab 9 - ANN.ipynb}
+      - id: nn-improvements
+        title: "Improving training: regularization, dropout, batch norm"
+      - id: nn-cnn
+        title: "Convolutional neural networks (CNNs)"
+        sources:
+          - {repo: msc-cf969, file: Lab 10 - CNN and RNN.ipynb}
+      - id: nn-rnn-lstm
+        title: "Recurrent networks and LSTMs for sequential/time-series data"
+        sources:
+          - {repo: msc-cf969, file: Lab 10 - CNN and RNN.ipynb}
+      - id: nn-transformers
+        title: "Transformers: architecture, training, and inference"
+      - id: nn-unsupervised
+        title: "Unsupervised neural nets: Self-Organizing Maps and ART"
+
+  - id: econometrics
+    title: "Time Series & Econometrics"
+    lessons:
+      - id: ec-stationarity
+        title: "Stationarity and the ADF test"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture41-Integration-Cointegration-and-Stationarity.ipynb}
+      - id: ec-arima
+        title: "ARIMA / SARIMA modeling"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture43-Autocorrelation-and-AR-Models.ipynb}
+      - id: ec-cointegration
+        title: "Cointegration and pairs trading"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture41-Integration-Cointegration-and-Stationarity.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture42-Introduction-to-Pairs-Trading.ipynb}
+      - id: ec-garch
+        title: "Volatility modeling with GARCH"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture44-ARCH-GARCH-and-GMM.ipynb}
+      - id: ec-factor
+        title: "Factor models (Fama-French style)"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture32-Fundamental-Factor-Models.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture34-Factor-Risk-Exposure.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture38-Factor-Analysis-with-Alphalens.ipynb}
+      - id: ec-kalman
+        title: "Kalman filters for dynamic/time-varying regressions"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture45-Kalman-Filters.ipynb}
+          - {repo: quantecon-lecture-python, file: kalman.md}
+
+  - id: financial-theory
+    title: "Financial Theory"
+    lessons:
+      - id: fin-mpt
+        title: "Modern Portfolio Theory and the efficient frontier"
+        sources:
+          - {repo: msc-cf969, file: Case study 1 - Portfolio optimisation.ipynb}
+      - id: fin-capm
+        title: "CAPM and Arbitrage Pricing Theory"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture30-CAPM-and-Arbitrage-Pricing-Theory.ipynb}
+      - id: fin-portfolio-construction
+        title: "Portfolio construction models: equal-weight, mean-variance, risk parity, Black-Litterman"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture35-Risk-Constrained-Portfolio-Optimization.ipynb}
+      - id: fin-cvxpy
+        title: "Portfolio optimization in practice with cvxpy: objectives, constraints, the efficient frontier"
+      - id: fin-hedging
+        title: "Hedging strategies: why and how to hedge, beta hedging"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture39-Why-Hedge.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture31-Beta-Hedging.ipynb}
+      - id: fin-derivatives
+        title: "Derivatives pricing: Black-Scholes, binomial trees, the Greeks"
+        sources:
+          - {repo: moquant-IntroToOptionPricing, file: options.ipynb}
+      - id: fin-fixedincome
+        title: "Fixed income: yield curves, duration and convexity"
+      - id: fin-microstructure
+        title: "Market microstructure: order books, liquidity, transaction costs"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture27-Introduction-to-Volume-Slippage-and-Liquidity.ipynb}
+      - id: fin-risk
+        title: "Risk management: VaR, CVaR, stress testing, drawdown analysis"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture24-Leverage.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture25-Position-Concentration-Risk.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture40-VaR-and-CVaR.ipynb}
+
+  - id: ml-finance
+    title: "ML Applied to Finance"
+    lessons:
+      - id: mf-features
+        title: "Feature engineering from price and fundamental data"
+      - id: mf-returns
+        title: "Return prediction models and lookahead bias"
+      - id: mf-lstm-fusion
+        title: "Combining technical and fundamental data with LSTM"
+        sources:
+          - {repo: msc-cf969, file: Lab 10b - Combining Technical and Fundamental Data using LSTM.ipynb}
+      - id: mf-nlp-altdata
+        title: "NLP for alternative data: sentiment from news and filings"
+      - id: mf-trade-execution
+        title: "Optimal trade execution using ML and linear programming"
+        sources:
+          - {repo: msc-cf969, file: Case Study 2 - Optimal Trade Execution using Machine Learning and Linear Programming.ipynb}
+      - id: mf-walkforward
+        title: "Walk-forward validation for time series"
+      - id: mf-backtest
+        title: "Backtesting fundamentals and pitfalls"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture33-Portfolio-Analysis-with-pyfolio.ipynb}
+
+  - id: engineering-practices
+    title: "Engineering Practices for Quant Work"
+    lessons:
+      - id: eng-sql
+        title: "SQL and handling large panel/tick datasets efficiently"
+      - id: eng-algo-framework
+        title: "Algorithm framework design: universe selection, alpha, portfolio construction, risk, execution"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture29-Universe-Selection.ipynb}
+      - id: eng-fill-models
+        title: "Realistic backtesting mechanics: fill models, slippage, and fee models"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture27-Introduction-to-Volume-Slippage-and-Liquidity.ipynb}
+          - {repo: quantrocket-lectures, file: Lecture28-Market-Impact-Models.ipynb}
+      - id: eng-backtest-discipline
+        title: "Backtesting discipline: survivorship bias, overfitting, realistic costs"
+      - id: eng-quantstats
+        title: "Strategy performance analysis with quantstats: Sharpe, drawdowns, tearsheets"
+      - id: eng-reproducibility
+        title: "Reproducibility, version control, and production deployment awareness"
+
+  - id: moquant-projects
+    title: "Applied Projects (MoQuant)"
+    lessons:
+      - id: mq-quant-intro
+        title: "Tour of quant finance fundamentals in code"
+        sources:
+          - {repo: moquant-IntroToQuantFinance, file: qfin.ipynb}
+      - id: mq-options
+        title: "Option pricing walkthrough: Black-Scholes in practice"
+        sources:
+          - {repo: moquant-IntroToOptionPricing, file: options.ipynb}
+      - id: mq-putcall
+        title: "Put-call parity testing on real options data"
+        sources:
+          - {repo: moquant-PutCallParity, file: pcp.py}
+          - {repo: moquant-PutCallParity, file: pricing.py}
+      - id: mq-garch
+        title: "GARCH volatility model implementation from scratch"
+        sources:
+          - {repo: moquant-GarchModel, file: garch.py}
+      - id: mq-vol-forecast
+        title: "Volatility forecasting with PyTorch"
+        sources:
+          - {repo: moquant-PyTorchVolForecaster, file: garch.ipynb}
+      - id: mq-price-forecast
+        title: "Stock price forecasting with PyTorch"
+        sources:
+          - {repo: moquant-PyTorchForecaster, file: n.py}
+      - id: mq-var
+        title: "Value-at-Risk simulation in Python"
+        sources:
+          - {repo: moquant-ValueAtRiskSimulation, file: vrisk.py}
+      - id: mq-pca
+        title: "PCA implemented from scratch on real data"
+        sources:
+          - {repo: moquant-PrincipalComponentAnalysis, file: xpca.py}
+      - id: mq-coint
+        title: "Cointegration and statistical arbitrage in code"
+        sources:
+          - {repo: moquant-Cointegration, file: coint.py}
+          - {repo: moquant-Cointegration, file: statarb.py}
+      - id: mq-portfolio
+        title: "Portfolio risk and return analysis"
+        sources:
+          - {repo: moquant-PortfolioOptimizationTutorial, file: "Risk&Return Analysis.ipynb"}
+
+  - id: capstone
+    title: "Capstone Projects"
+    lessons:
+      - id: cap-momentum
+        title: "Build a momentum signal model for an ETF universe"
+      - id: cap-vol
+        title: "Build a volatility forecaster"
+      - id: cap-pairs
+        title: "Build a cointegration-based pairs-trading screener"
+      - id: cap-options
+        title: "Build an option pricing/Greeks calculator with an implied vol surface"
+      - id: cap-risk
+        title: "Build a portfolio risk model (VaR/CVaR) across a multi-asset book"
+      - id: cap-lstm
+        title: "Build an LSTM model fusing technical and fundamental signals"
+      - id: cap-framework
+        title: "Build a QuantConnect-style algorithm framework for your ETF universe"
+      - id: cap-longshort
+        title: "Build a long-short equity strategy from factor rankings"
+        sources:
+          - {repo: quantrocket-lectures, file: Lecture37-Long-Short-Equity.ipynb}

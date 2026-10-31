@@ -1,0 +1,7 @@
+.venv
+__pycache__/
+*.pyc
+data/progress.json
+data/plots/
+corpus/
+data/rag_index/

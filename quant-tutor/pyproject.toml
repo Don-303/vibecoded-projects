@@ -1,0 +1,52 @@
+[project]
+name = "quant-tutor"
+version = "1.0.0"
+description = "Offline terminal tutor for Python, ML, econometrics, and quantitative finance, powered by a local LLM via Ollama"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "textual",
+    "ollama",
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "scikit-learn",
+    "statsmodels",
+    "arch",
+    "cvxpy",
+    "quantstats",
+    "torch",
+    "rich",
+    "rich-pixels",
+    "pyyaml",
+    "ipykernel",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# The corpus registry is a table of (name, url, subdir, glob) rows; keeping
+# each source on one line beats wrapping URLs.
+"app/rag.py" = ["E501"]
+# Textual compose() nests `with` container blocks by design.
+"app/main.py" = ["SIM117"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import sorting
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+]
