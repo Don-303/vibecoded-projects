@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>PersonalOps mirrors task deadlines into Reminders so iOS can alert you even when the app isn't open.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>PersonalOps adds task deadlines to Calendar so they show up alongside the rest of your schedule.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>PersonalOps connects to your Hermes server on your home network for AI chat and data backups.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+</dict>
+</plist>

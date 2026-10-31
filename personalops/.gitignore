@@ -1,0 +1,10 @@
+# SwiftPM / xtool build output
+.build/
+xtool/
+*.ipa
+
+# python
+__pycache__/
+*.pyc
+
+.DS_Store
